@@ -56,10 +56,9 @@ impl From<ParseFloatError> for LexingError {
     }
 }
 
-const SUM_LEFT_GROUP: u32     = 0b___1;
-const SUM_RIGHT_GROUP: u32     = 0b__10;
-const PROD_LEFT_GROUP: u32    = 0b_100;
-const PROD_RIGHT_GROUP: u32    = 0b1000;
+const ROOT_GROUP: u32   = 0b__0;
+const SUM_GROUP: u32    = 0b__1;
+const PROD_GROUP: u32   = 0b_10;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OpKind {
@@ -76,8 +75,6 @@ impl OpKind {
         match self {
             OpKind::Root => Some(0),
             _ => Some(2)
-        //     OpKind::Add | OpKind::Mul               => None,
-        //     OpKind::Sub | OpKind::Div | OpKind::Mod => Some(2)
         }
     }
 }
@@ -100,9 +97,9 @@ impl Operator {
 impl Operator {
     fn left_precedence(&self) -> Option<u32> {
         match self.kind {
-            OpKind::Add | OpKind::Sub               => Some(SUM_LEFT_GROUP),
-            OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_LEFT_GROUP),
-            OpKind::Root => Some(0),
+            OpKind::Add | OpKind::Sub               => Some(SUM_GROUP),
+            OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_GROUP),
+            OpKind::Root => Some(ROOT_GROUP),
         }
     }
 
@@ -110,14 +107,14 @@ impl Operator {
         match self.kind {
             OpKind::Add | OpKind::Sub               => {
                 if let Some(AST::None) = self.children.last() {
-                    Some(PROD_RIGHT_GROUP)
+                    Some(PROD_GROUP)
                 }
                 else {
-                    Some(SUM_RIGHT_GROUP)
+                    Some(SUM_GROUP)
                 }
             },
-            OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_RIGHT_GROUP),
-            OpKind::Root => Some(0),
+            OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_GROUP),
+            OpKind::Root => Some(ROOT_GROUP),
         }
     }
 
@@ -127,7 +124,7 @@ impl Operator {
             Ok(())
         }
         else if item != AST::None {
-            Err(todo!())
+            Err(ParseError::ItemExpected)
         }
         else {
             Ok(())
@@ -137,7 +134,7 @@ impl Operator {
     fn arity_check(&self) -> Result<(), ParseError> {
         let arity = self.kind.arity();
         if arity.is_some() && Some(self.children.len()) != arity {
-            Err(todo!())
+            Err(ParseError::InvalidArity)
         }
         else {
             Ok(())
@@ -172,30 +169,14 @@ fn parse_inner(lex: &mut Lexer<Token>, mut last_op: Operator, item: AST) -> Resu
     };
 
     match next_token {
-        Token::Nat(n)   => {
-            if item == AST::None {
-                parse_inner(lex, last_op, AST::Nat(n))
-            }
-            else {
-                parse_apposition(lex, last_op, item, AST::Nat(n))
-            }
-        },
-        Token::Float(f) => {
-            if item == AST::None {
-                parse_inner(lex, last_op, AST::Float(f))
-            }
-            else {
-                parse_apposition(lex, last_op, item, AST::Float(f))
-            }
-        },
-        Token::Id(id) => {
-            if item == AST::None {
-                parse_inner(lex, last_op, AST::Id(id))
-            }
-            else {
-                parse_apposition(lex, last_op, item, AST::Id(id))
-            }
-        },
+        Token::Nat(n)   if item == AST::None => parse_inner(lex, last_op, AST::Nat(n)),
+        Token::Float(f) if item == AST::None => parse_inner(lex, last_op, AST::Float(f)),
+        Token::Id(id)   if item == AST::None => parse_inner(lex, last_op, AST::Id(id)),
+
+        Token::Nat(n)   => parse_apposition(lex, last_op, item, AST::Nat(n)),
+        Token::Float(f) => parse_apposition(lex, last_op, item, AST::Float(f)),
+        Token::Id(id)   => parse_apposition(lex, last_op, item, AST::Id(id)),
+
         Token::Op(kind) => {
             let mut this_op = Operator::new(kind);
             let this_op_precedence = this_op.left_precedence();
@@ -219,6 +200,7 @@ fn parse_inner(lex: &mut Lexer<Token>, mut last_op: Operator, item: AST) -> Resu
     }
 }
 
+#[allow(unused_mut, unused_variables)]
 fn parse_apposition(lex: &mut Lexer<Token>, mut last_op: Operator, item_1: AST, item_2: AST) -> Result<AST, ParseError> {
     todo!()
 }
@@ -227,6 +209,8 @@ fn parse_apposition(lex: &mut Lexer<Token>, mut last_op: Operator, item_1: AST, 
 pub enum ParseError {
     LexingError(LexingError),
     EmptyFile,
+    ItemExpected,
+    InvalidArity,
     InvalidEmptySlot(String),
 }
 
