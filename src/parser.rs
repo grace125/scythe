@@ -3,27 +3,34 @@ use std::num::{ParseIntError, ParseFloatError};
 pub use OpKind::*;
 
 
-const IF_GROUP: u32                 = 0b________1;
-const THEN_GROUP: u32               = 0b_______10;
-const ELSE_GROUP: u32               = 0b______100;
-const FUNC_RIGHT_GROUP: u32         = 0b_____1000;
-const FUNC_LEFT_GROUP: u32          = 0b____10000;
-const SUM_GROUP: u32                = 0b___100000;
-const PROD_GROUP: u32               = 0b__1000000;
-const APPOSITION_RIGHT_GROUP: u32   = 0b_10000000;
-const APPOSITION_LEFT_GROUP: u32    = 0b100000000;
+
+const IF_GROUP: u32                 = 0b___________1;
+const THEN_GROUP: u32               = 0b__________10;
+const ELSE_GROUP: u32               = 0b_________100;
+const COLON_LEFT_GROUP: u32         = 0b________1000;
+const COLON_RIGHT_GROUP: u32        = 0b_______10000;
+const FUNC_RIGHT_GROUP: u32         = 0b______100000;
+const FUNC_LEFT_GROUP: u32          = 0b_____1000000;
+const SUM_GROUP: u32                = 0b____10000000;
+const PROD_GROUP: u32               = 0b___100000000;
+const APPOSITION_RIGHT_GROUP: u32   = 0b__1000000000;
+const APPOSITION_LEFT_GROUP: u32    = 0b_10000000000;
+
 
 
 const ROOT_SLOT: Slot               = Slot::new(0, 0);
 const IF_SLOT: Slot                 = Slot::new(IF_GROUP, 0);
 const THEN_SLOT: Slot               = Slot::new(THEN_GROUP, 0);
 const ELSE_SLOT: Slot               = Slot::new(ELSE_GROUP, 0);
+const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_GROUP, FUNC_RIGHT_GROUP | ELSE_GROUP);
+const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_GROUP, FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
 const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_GROUP, 0);
 const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
 const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
 const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
 const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
 const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, SUM_GROUP | PROD_GROUP);
+
 
 
 
@@ -58,6 +65,7 @@ fn op_kind_from_str(s: &str) -> OpKind {
         "then" => OpKind::Then,
         "else" => OpKind::Else,
         "=>" => OpKind::Func,
+        ":" => OpKind::Colon,
         _ => unreachable!()
     }
 }
@@ -94,6 +102,7 @@ pub enum OpKind {
     Then,
     Else,
     Func,
+    Colon,
     Apposition,
     Root,
 }
@@ -164,7 +173,8 @@ impl Op {
             OpKind::If => None,
             OpKind::Then => Some(THEN_SLOT),
             OpKind::Else => Some(ELSE_SLOT),
-            OpKind::Func => Some(FUNC_LEFT_SLOT)
+            OpKind::Func => Some(FUNC_LEFT_SLOT),
+            OpKind::Colon => Some(COLON_LEFT_SLOT)
         }
     }
 
@@ -180,6 +190,7 @@ impl Op {
             OpKind::Then => Some(THEN_SLOT),
             OpKind::Else => Some(ELSE_SLOT),
             OpKind::Func => Some(FUNC_RIGHT_SLOT),
+            OpKind::Colon => Some(COLON_RIGHT_SLOT)
         }
     }
 }
@@ -565,15 +576,89 @@ mod tests {
     }
 
     mod colon {
-        // use super::*;
+        use super::*;
 
-        // #[test]
-        // fn colon_func() -> Result<(), ParseError> {
-        //     Ok(assert_eq!(
-        //         parse(&mut Token::lexer("a: A + B => b: A * B => a + b"))?,
-        //         root(todo!())
-        //     ))
-        // }
+        // FIXME: should this be a conflict?
+        #[test]
+        fn colon_left_assoc() -> Result<(), ParseError> {
+            assert_left_assoc("a: A: Type", Colon, id("a"), id("A"), id("Type"))
+        }
+
+        #[test]
+        fn colon_apposition() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("list: Vec T n"))?,
+                root(op(Colon, id("list"), op(Apposition, id("Vec"), op(Apposition, id("T"), id("n")))))
+            ))
+        }
+
+        // FIXME: should this be a conflict?
+        #[test]
+        fn apposition_colon() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("f x: T"))?,
+                root(op(Colon, op(Apposition, id("f"), id("x")), id("T")))
+            ))
+        }
+
+        #[test]
+        fn arithmetic_colon() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("a / b: A"))?,
+                root(op(Colon, op(Div, id("a"), id("b")), id("A")))
+            ))
+        }
+
+        #[test]
+        fn colon_arithmetic_conflict() {
+            assert_eq!(
+                parse(&mut Token::lexer("a: A * B")),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn colon_if_then() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("if a: A then b: B"))?,
+                root(if_then(
+                    op(Colon, id("a"), id("A")),
+                    op(Colon, id("b"), id("B")),
+                ))
+            ))
+        }
+
+        #[test]
+        fn colon_else_conflict() {
+            assert_eq!(
+                parse(&mut Token::lexer("if a then b else c: D")),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn colon_func_conflict() {
+            assert_eq!(
+                parse(&mut Token::lexer("a: A => b")),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn func_colon_conflict() {
+            assert_eq!(
+                parse(&mut Token::lexer("a => a: B")),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn func_colon_conflict_2() {
+            assert_eq!(
+                parse(&mut Token::lexer("a: A + A => a + b")),
+                Err(ParseError::OperatorConflict)
+            )
+        }
     }
 
     mod func_type {
