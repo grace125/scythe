@@ -1,34 +1,42 @@
 use logos::{Logos, Lexer};
 use std::num::{ParseIntError, ParseFloatError};
+pub use OpKind::*;
 
-const APPOSITION_LEFT_GROUP: u32    = 0b__10;
-const APPOSITION_RIGHT_GROUP: u32   = 0b___1;
-const SUM_GROUP: u32                = 0b_100;
-const PROD_GROUP: u32               = 0b1000;
+const IF_RIGHT_GROUP: u32           = 0b_____1;
+const IF_LEFT_GROUP: u32            = 0b____10;
+const SUM_GROUP: u32                = 0b___100;
+const PROD_GROUP: u32               = 0b__1000;
+const APPOSITION_RIGHT_GROUP: u32   = 0b_10000;
+const APPOSITION_LEFT_GROUP: u32    = 0b100000;
 
-const ROOT_SLOT: OperatorSlot               = OperatorSlot::new(0, 0);
-const APPOSITION_LEFT_SLOT: OperatorSlot    = OperatorSlot::new(APPOSITION_LEFT_GROUP, 0);
-const APPOSITION_RIGHT_SLOT: OperatorSlot   = OperatorSlot::new(APPOSITION_RIGHT_GROUP, 0);
-const SUM_SLOT: OperatorSlot                = OperatorSlot::new(SUM_GROUP, 0);
-const PROD_SLOT: OperatorSlot               = OperatorSlot::new(PROD_GROUP, 0);
+
+const ROOT_SLOT: OpSlot               = OpSlot::new(0, 0);
+const IF_RIGHT_SLOT: OpSlot           = OpSlot::new(IF_RIGHT_GROUP, 0);
+const IF_LEFT_SLOT: OpSlot            = OpSlot::new(IF_LEFT_GROUP, 0);
+const SUM_SLOT: OpSlot                = OpSlot::new(SUM_GROUP, 0);
+const PROD_SLOT: OpSlot               = OpSlot::new(PROD_GROUP, 0);
+const APPOSITION_LEFT_SLOT: OpSlot    = OpSlot::new(APPOSITION_LEFT_GROUP, 0);
+const APPOSITION_RIGHT_SLOT: OpSlot   = OpSlot::new(APPOSITION_RIGHT_GROUP, SUM_GROUP | PROD_GROUP);
+
+
 
 #[derive(Logos, Debug, PartialEq)]
 #[logos(error = LexingError)]
 #[logos(skip r"[ \t\n\f]+")]
 pub enum Token {
-    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*", |lex| lex.slice().to_string(), priority = 2)]
+    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*", |lex| lex.slice().to_string(), priority = 1)]
     Id(String),
 
-    #[regex(r"[0-9]+", |lex| lex.slice().parse(), priority = 1)] 
+    #[regex(r"[0-9]+", |lex| lex.slice().parse(), priority = 2)] 
     Nat(u64),
 
-    #[regex(r"[0-9]+\.[0-9]*", |lex| lex.slice().parse(), priority = 1)]
+    #[regex(r"[0-9]+\.[0-9]*", |lex| lex.slice().parse(), priority = 2)]
     Float(f64),
 
     // #[regex("\"\"")]
     // String,
 
-    #[regex(r"([]{}();:,+*-/%]|=>|if|then|else)", |lex| op_kind_from_str(lex.slice()), priority = 1)]
+    #[regex(r"([\[\]{}();:,+*-/%]|=>|if|then|else)", |lex| op_kind_from_str(lex.slice()), priority = 2)]
     Op(OpKind),
 }
 
@@ -39,6 +47,9 @@ fn op_kind_from_str(s: &str) -> OpKind {
         "-" => OpKind::Sub,
         "/" => OpKind::Div,
         "%" => OpKind::Mod,
+        "if" => OpKind::If,
+        "then" => OpKind::Then,
+        "else" => OpKind::Else,
         _ => unreachable!()
     }
 }
@@ -71,20 +82,27 @@ pub enum OpKind {
     Mul,
     Div,
     Mod,
+    If,
+    Then,
+    Else,
     Apposition,
     Root,
 }
 
 #[derive(Clone, PartialEq)]
-pub struct Operator {
+pub struct Op {
     kind: OpKind,
     left: Option<Box<CST>>,
     right: Option<Box<CST>>
 }
 
-impl std::fmt::Debug for Operator {
+pub fn op(kind: OpKind, left: impl Into<Option<Box<CST>>>, right: impl Into<Option<Box<CST>>>) -> Op {
+    Op { kind, left: left.into(), right: right.into() }
+}
+
+impl std::fmt::Debug for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Operator { kind, left, right } = self;
+        let Op { kind, left, right } = self;
         
         f.write_fmt(format_args!("{:?}(", kind))?;
         if let Some(left) = left {
@@ -101,43 +119,45 @@ impl std::fmt::Debug for Operator {
     }
 }
 
-impl Into<CST> for Operator {
+impl Into<CST> for Op {
     fn into(self) -> CST {
         CST::Op(self)
     }
 }
 
-impl Into<Box<CST>> for Operator {
+impl Into<Box<CST>> for Op {
     fn into(self) -> Box<CST> {
         Box::new(CST::Op(self))
     }
 }
 
-impl Into<Option<Box<CST>>> for Operator {
+impl Into<Option<Box<CST>>> for Op {
     fn into(self) -> Option<Box<CST>> {
         Some(Box::new(CST::Op(self)))
     }
 }
 
-impl Operator {
-    pub fn new(kind: OpKind) -> Operator {
-        Operator { 
+impl Op {
+    pub fn new(kind: OpKind) -> Op {
+        Op { 
             kind, 
             left: None,
             right: None 
         }
     }
 
-    fn left_slot(&self) -> Option<OperatorSlot> {
+    fn left_slot(&self) -> Option<OpSlot> {
         match self.kind {
             OpKind::Add | OpKind::Sub               => Some(SUM_SLOT),
             OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_SLOT),
             OpKind::Apposition => Some(APPOSITION_LEFT_SLOT),
             OpKind::Root => Some(ROOT_SLOT),
+            OpKind::If => None,
+            OpKind::Then | OpKind::Else => Some(IF_LEFT_SLOT)
         }
     }
 
-    fn right_slot(&self) -> Option<OperatorSlot> {
+    fn right_slot(&self) -> Option<OpSlot> {
         match self.kind {
             OpKind::Add | OpKind::Sub => Some(
                 if self.left.is_none() { PROD_SLOT } else { SUM_SLOT }
@@ -145,21 +165,22 @@ impl Operator {
             OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_SLOT),
             OpKind::Apposition => Some(APPOSITION_RIGHT_SLOT),
             OpKind::Root => Some(ROOT_SLOT),
+            OpKind::If | OpKind::Then | OpKind::Else => Some(IF_RIGHT_SLOT)
         }
     }
 }
 
-pub struct OperatorSlot {
+pub struct OpSlot {
     precedence: u32,
     conflicts: u32,
 }
 
-impl OperatorSlot {
+impl OpSlot {
     const fn new(precedence: u32, conflicts: u32) -> Self {
-        OperatorSlot { precedence, conflicts }
+        OpSlot { precedence, conflicts }
     }
 
-    fn takes_precedence_over(&self, other: &OperatorSlot) -> Result<bool, ParseError> {
+    fn takes_precedence_over(&self, other: &OpSlot) -> Result<bool, ParseError> {
         if (self.precedence & other.conflicts) | (other.precedence & self.conflicts) != 0 {
             Err(ParseError::OperatorConflict)
         }
@@ -171,7 +192,7 @@ impl OperatorSlot {
 
 #[derive(Clone, PartialEq)]
 pub enum CST {
-    Op(Operator),
+    Op(Op),
     Nat(u64),
     Float(f64),
     Id(String),
@@ -195,10 +216,10 @@ impl Into<Option<Box<CST>>> for CST {
 }
 
 pub fn parse(lex: &mut Lexer<Token>) -> Result<CST, ParseError> {
-    _parse(lex, Operator::new(OpKind::Root), None).map(|op| CST::Op(op))
+    _parse(lex, Op::new(OpKind::Root), None).map(|op| CST::Op(op))
 }
 
-fn _parse(lex: &mut Lexer<Token>, mut last_op: Operator, item: Option<Box<CST>>) -> Result<Operator, ParseError> {
+fn _parse(lex: &mut Lexer<Token>, mut last_op: Op, item: Option<Box<CST>>) -> Result<Op, ParseError> {
     let next_token = match lex.next() {
         Some(Ok(t)) => t,
         Some(Err(e)) => return Err(ParseError::from(e)),
@@ -213,7 +234,7 @@ fn _parse(lex: &mut Lexer<Token>, mut last_op: Operator, item: Option<Box<CST>>)
         Token::Float(f) => parse_literal(lex, last_op, item, CST::Float(f)),
         Token::Id(id)   => parse_literal(lex, last_op, item, CST::Id(id)),
         Token::Op(op_kind) => {
-            let mut this_op = Operator::new(op_kind);
+            let mut this_op = Op::new(op_kind);
             match (last_op.right_slot(), item, this_op.left_slot()) {
                 (Some(last_slot), item, Some(this_slot)) => parse_comparison(lex, last_op, last_slot, this_op, this_slot, item, None),
                 (None, None, Some(_)) => {
@@ -222,7 +243,7 @@ fn _parse(lex: &mut Lexer<Token>, mut last_op: Operator, item: Option<Box<CST>>)
                 },
                 (None, Some(item), Some(_)) => {
                     this_op.left = Some(item);
-                    Ok(Operator {
+                    Ok(Op {
                         kind: OpKind::Apposition, 
                         left: last_op.into(), 
                         right: _parse(lex, this_op, None)?.into()
@@ -232,20 +253,20 @@ fn _parse(lex: &mut Lexer<Token>, mut last_op: Operator, item: Option<Box<CST>>)
                     last_op.right = _parse(lex, this_op, None)?.into();
                     Ok(last_op)
                 },
-                (Some(_), Some(item), None) => Ok(Operator {
+                (Some(_), Some(item), None) => Ok(Op {
                     kind: OpKind::Apposition, 
                     left: Some(item), 
                     right: _parse(lex, this_op, None)?.into()
                 }),
-                (None, None, None) => Ok(Operator { 
+                (None, None, None) => Ok(Op { 
                     kind: OpKind::Apposition, 
                     left: last_op.into(), 
                     right: _parse(lex, this_op, None)?.into()
                 }),
-                (None, Some(item), None) => Ok(Operator {
+                (None, Some(item), None) => Ok(Op {
                     kind: OpKind::Apposition,
                     left: last_op.into(),
-                    right: Operator {
+                    right: Op {
                         kind: OpKind::Apposition,
                         left: item.into(),
                         right: _parse(lex, this_op, None)?.into()
@@ -257,17 +278,17 @@ fn _parse(lex: &mut Lexer<Token>, mut last_op: Operator, item: Option<Box<CST>>)
 }
 
 #[inline]
-fn parse_literal(lex: &mut Lexer<Token>, last_op: Operator, item: Option<Box<CST>>, literal: CST) -> Result<Operator, ParseError> {
+fn parse_literal(lex: &mut Lexer<Token>, last_op: Op, item: Option<Box<CST>>, literal: CST) -> Result<Op, ParseError> {
     if item.is_some() {
         match last_op.right_slot() {
             Some(last_slot) => parse_comparison(
                 lex, 
                 last_op, last_slot, 
-                Operator::new(OpKind::Apposition), APPOSITION_LEFT_SLOT, 
+                Op::new(OpKind::Apposition), APPOSITION_LEFT_SLOT, 
                 item, Some(Box::new(literal))
             ),
             None => {
-                let this_op = Operator {
+                let this_op = Op {
                     kind: OpKind::Apposition,
                     left: Some(Box::new(CST::Op(last_op))),
                     right: None
@@ -284,24 +305,24 @@ fn parse_literal(lex: &mut Lexer<Token>, last_op: Operator, item: Option<Box<CST
 #[inline]
 fn parse_comparison(
     lex: &mut Lexer<Token>, 
-    mut last_op: Operator,  last_slot: OperatorSlot, 
-    mut this_op: Operator,  this_slot: OperatorSlot, 
+    mut last_op: Op,  last_slot: OpSlot, 
+    mut this_op: Op,  this_slot: OpSlot, 
     item: Option<Box<CST>>, next_item: Option<Box<CST>>
-) -> Result<Operator, ParseError> {
+) -> Result<Op, ParseError> {
     if last_slot.takes_precedence_over(&this_slot)? {
         last_op.right = item;
-        this_op.left = Some(Box::new(CST::Op(last_op)));
+        this_op.left = last_op.into();
         _parse(lex, this_op, next_item)
     }
     else {
         this_op.left = item;
-        last_op.right = Some(Box::new(_parse(lex, this_op, next_item)?.into()));
+        last_op.right = _parse(lex, this_op, next_item)?.into();
         Ok(last_op)
     }
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParseError {
     OperatorConflict,
     LexingError(LexingError),
@@ -323,99 +344,117 @@ mod tests {
 
     use super::*;
 
-    fn rooted(op: Operator) -> CST {
-        CST::Op(Operator {
+    fn root(op: Op) -> CST {
+        CST::Op(Op {
             kind: OpKind::Root,
             left: None,
             right: op.into()
         })
     }
 
+    fn id(s: &str) -> CST {
+        CST::Id(s.to_owned())
+    }
+
+    fn nat(s: u64) -> CST {
+        CST::Nat(s)
+    }
+
+    fn if_then_else(condition: impl Into<CST>, case_1: impl Into<CST>, case_2: impl Into<CST>) -> Op {
+        op(If, None, op(Then, condition.into(), op(Else, case_1.into(), case_2.into(
+
+        ))))
+    }
+
     #[test]
     fn arithmetic() -> Result<(), ParseError> {
-        assert_eq!(parse(&mut Token::lexer("x * y + z"))?, rooted(Operator {
-            kind: OpKind::Add,
-            left: Operator {
-                kind: OpKind::Mul,
-                left: CST::Id("x".to_string()).into(),
-                right: CST::Id("y".to_string()).into()
-            }.into(),
-            right: CST::Id("z".to_string()).into()
-        }));
+        assert_eq!(
+            parse(&mut Token::lexer("x * y + z"))?, 
+            root(op(Add, op(Mul, id("x"), id("y")), id("z")))
+        );
         Ok(())
     }
 
     #[test]
     fn arithmetic_2() -> Result<(), ParseError> {
-        assert_eq!(parse(&mut Token::lexer("2 % x - yy / 44"))?, rooted(Operator {
-            kind: OpKind::Sub,
-            left: Operator {
-                kind: OpKind::Mod,
-                left: CST::Nat(2).into(),
-                right: CST::Id("x".to_string()).into()
-            }.into(),
-            right: Operator {
-                kind: OpKind::Div,
-                left: CST::Id("yy".to_string()).into(),
-                right: CST::Nat(44).into()
-            }.into()
-        }));
+        assert_eq!(
+            parse(&mut Token::lexer("2 % x - yy / 44"))?, 
+            root(op(Sub, op(Mod, nat(2), id("x")), op(Div, id("yy"), nat(44))))
+        );
         Ok(())
     }
 
-    fn assert_left_assoc(s: &str, op_kind: OpKind) -> Result<(), ParseError> {
-        assert_eq!(parse(&mut Token::lexer(s))?, rooted(Operator {
-            kind: op_kind,
-            left: Operator {
-                kind: op_kind,
-                left: CST::Id("x".to_string()).into(),
-                right: CST::Id("y".to_string()).into()
-            }.into(),
-            right: CST::Id("z".to_string()).into(),
-        }));
+    #[test]
+    fn apposition_addition_conflict() {
+        match parse(&mut Token::lexer("f x + y")) {
+            Err(ParseError::OperatorConflict) => {},
+            _ => panic!("Expected operator conflict")
+        }
+    }
+
+    #[test]
+    fn addition_apposition() -> Result<(), ParseError> {
+        assert_eq!(
+            parse(&mut Token::lexer("x + f y"))?, 
+            root(op(Add, id("x"), op(Apposition, id("f"), id("y"))))
+        );
         Ok(())
     }
 
-    fn assert_right_assoc(s: &str, op_kind: OpKind) -> Result<(), ParseError> {
-        assert_eq!(parse(&mut Token::lexer(s))?, rooted(Operator {
-            kind: op_kind,
-            left: CST::Id("x".to_string()).into(),
-            right: Operator {
-                kind: op_kind,
-                left: CST::Id("y".to_string()).into(),
-                right: CST::Id("z".to_string()).into()
-            }.into(),
-        }));
+    #[test]
+    fn if_then_else_basic() -> Result<(), ParseError> {
+        assert_eq!(
+            parse(&mut Token::lexer("if x then y else z"))?, 
+            root(if_then_else(id("x"), id("y"), id("z")))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn if_then_else_arithmetic() -> Result<(), ParseError> {
+        assert_eq!(
+            parse(&mut Token::lexer("if w + x then x % y else y * z"))?, 
+            root(if_then_else(op(Add, id("w"), id("x")), op(Mod, id("x"), id("y")), op(Mul, id("y"), id("z"))))
+        );
+        Ok(())
+    }
+
+    fn assert_left_assoc(s: &str, kind: OpKind, id1: CST, id2: CST, id3: CST) -> Result<(), ParseError> {
+        assert_eq!(parse(&mut Token::lexer(s))?, root(op(kind, op(kind, id1, id2), id3)));
+        Ok(())
+    }
+    fn assert_right_assoc(s: &str, kind: OpKind, id1: CST, id2: CST, id3: CST) -> Result<(), ParseError> {
+        assert_eq!(parse(&mut Token::lexer(s))?, root(op(kind, id1, op(kind, id2, id3))));
         Ok(())
     }
 
     #[test]
     fn addition_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x + y + z", OpKind::Add)
+        assert_left_assoc("x + y + z", Add, id("x"), id("y"), id("z"))
     }
 
     #[test]
     fn subtraction_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x - y - z", OpKind::Sub)
+        assert_left_assoc("x - y - z", Sub, id("x"), id("y"), id("z"))
     }
 
     #[test]
     fn multiplication_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x * y * z", OpKind::Mul)
+        assert_left_assoc("x * y * z", Mul, id("x"), id("y"), id("z"))
     }
 
     #[test]
     fn division_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x / y / z", OpKind::Div)
+        assert_left_assoc("x / y / z", Div, id("x"), id("y"), id("z"))
     }
 
     #[test]
     fn modulo_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x % y % z", OpKind::Mod)
+        assert_left_assoc("x % y % z", Mod, id("x"), id("y"), id("z"))
     }
 
     #[test]
     fn apposition_right_assoc() -> Result<(), ParseError> {
-        assert_right_assoc("x y z", OpKind::Apposition)
+        assert_right_assoc("x y z", Apposition, id("x"), id("y"), id("z"))
     }
 }
