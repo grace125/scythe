@@ -2,21 +2,28 @@ use logos::{Logos, Lexer};
 use std::num::{ParseIntError, ParseFloatError};
 pub use OpKind::*;
 
-const IF_RIGHT_GROUP: u32           = 0b_____1;
-const IF_LEFT_GROUP: u32            = 0b____10;
-const SUM_GROUP: u32                = 0b___100;
-const PROD_GROUP: u32               = 0b__1000;
-const APPOSITION_RIGHT_GROUP: u32   = 0b_10000;
-const APPOSITION_LEFT_GROUP: u32    = 0b100000;
+
+const IF_GROUP: u32                 = 0b________1;
+const THEN_GROUP: u32               = 0b_______10;
+const ELSE_GROUP: u32               = 0b______100;
+const FUNC_RIGHT_GROUP: u32         = 0b_____1000;
+const FUNC_LEFT_GROUP: u32          = 0b____10000;
+const SUM_GROUP: u32                = 0b___100000;
+const PROD_GROUP: u32               = 0b__1000000;
+const APPOSITION_RIGHT_GROUP: u32   = 0b_10000000;
+const APPOSITION_LEFT_GROUP: u32    = 0b100000000;
 
 
-const ROOT_SLOT: OpSlot               = OpSlot::new(0, 0);
-const IF_RIGHT_SLOT: OpSlot           = OpSlot::new(IF_RIGHT_GROUP, 0);
-const IF_LEFT_SLOT: OpSlot            = OpSlot::new(IF_LEFT_GROUP, 0);
-const SUM_SLOT: OpSlot                = OpSlot::new(SUM_GROUP, 0);
-const PROD_SLOT: OpSlot               = OpSlot::new(PROD_GROUP, 0);
-const APPOSITION_LEFT_SLOT: OpSlot    = OpSlot::new(APPOSITION_LEFT_GROUP, 0);
-const APPOSITION_RIGHT_SLOT: OpSlot   = OpSlot::new(APPOSITION_RIGHT_GROUP, SUM_GROUP | PROD_GROUP);
+const ROOT_SLOT: Slot               = Slot::new(0, 0);
+const IF_SLOT: Slot                 = Slot::new(IF_GROUP, 0);
+const THEN_SLOT: Slot               = Slot::new(THEN_GROUP, 0);
+const ELSE_SLOT: Slot               = Slot::new(ELSE_GROUP, 0);
+const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_GROUP, 0);
+const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
+const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
+const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
+const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
+const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, SUM_GROUP | PROD_GROUP);
 
 
 
@@ -50,6 +57,7 @@ fn op_kind_from_str(s: &str) -> OpKind {
         "if" => OpKind::If,
         "then" => OpKind::Then,
         "else" => OpKind::Else,
+        "=>" => OpKind::Func,
         _ => unreachable!()
     }
 }
@@ -85,6 +93,7 @@ pub enum OpKind {
     If,
     Then,
     Else,
+    Func,
     Apposition,
     Root,
 }
@@ -146,18 +155,20 @@ impl Op {
         }
     }
 
-    fn left_slot(&self) -> Option<OpSlot> {
+    fn left_slot(&self) -> Option<Slot> {
         match self.kind {
             OpKind::Add | OpKind::Sub               => Some(SUM_SLOT),
             OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_SLOT),
             OpKind::Apposition => Some(APPOSITION_LEFT_SLOT),
             OpKind::Root => Some(ROOT_SLOT),
             OpKind::If => None,
-            OpKind::Then | OpKind::Else => Some(IF_LEFT_SLOT)
+            OpKind::Then => Some(THEN_SLOT),
+            OpKind::Else => Some(ELSE_SLOT),
+            OpKind::Func => Some(FUNC_LEFT_SLOT)
         }
     }
 
-    fn right_slot(&self) -> Option<OpSlot> {
+    fn right_slot(&self) -> Option<Slot> {
         match self.kind {
             OpKind::Add | OpKind::Sub => Some(
                 if self.left.is_none() { PROD_SLOT } else { SUM_SLOT }
@@ -165,22 +176,25 @@ impl Op {
             OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_SLOT),
             OpKind::Apposition => Some(APPOSITION_RIGHT_SLOT),
             OpKind::Root => Some(ROOT_SLOT),
-            OpKind::If | OpKind::Then | OpKind::Else => Some(IF_RIGHT_SLOT)
+            OpKind::If => Some(IF_SLOT),
+            OpKind::Then => Some(THEN_SLOT),
+            OpKind::Else => Some(ELSE_SLOT),
+            OpKind::Func => Some(FUNC_RIGHT_SLOT),
         }
     }
 }
 
-pub struct OpSlot {
+pub struct Slot {
     precedence: u32,
     conflicts: u32,
 }
 
-impl OpSlot {
+impl Slot {
     const fn new(precedence: u32, conflicts: u32) -> Self {
-        OpSlot { precedence, conflicts }
+        Slot { precedence, conflicts }
     }
 
-    fn takes_precedence_over(&self, other: &OpSlot) -> Result<bool, ParseError> {
+    fn takes_precedence_over(&self, other: &Slot) -> Result<bool, ParseError> {
         if (self.precedence & other.conflicts) | (other.precedence & self.conflicts) != 0 {
             Err(ParseError::OperatorConflict)
         }
@@ -305,8 +319,8 @@ fn parse_literal(lex: &mut Lexer<Token>, last_op: Op, item: Option<Box<CST>>, li
 #[inline]
 fn parse_comparison(
     lex: &mut Lexer<Token>, 
-    mut last_op: Op,  last_slot: OpSlot, 
-    mut this_op: Op,  this_slot: OpSlot, 
+    mut last_op: Op,  last_slot: Slot, 
+    mut this_op: Op,  this_slot: Slot, 
     item: Option<Box<CST>>, next_item: Option<Box<CST>>
 ) -> Result<Op, ParseError> {
     if last_slot.takes_precedence_over(&this_slot)? {
@@ -361,100 +375,209 @@ mod tests {
     }
 
     fn if_then_else(condition: impl Into<CST>, case_1: impl Into<CST>, case_2: impl Into<CST>) -> Op {
-        op(If, None, op(Then, condition.into(), op(Else, case_1.into(), case_2.into(
-
-        ))))
+        op(If, None, op(Then, condition.into(), op(Else, case_1.into(), case_2.into())))
     }
 
-    #[test]
-    fn arithmetic() -> Result<(), ParseError> {
-        assert_eq!(
-            parse(&mut Token::lexer("x * y + z"))?, 
-            root(op(Add, op(Mul, id("x"), id("y")), id("z")))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn arithmetic_2() -> Result<(), ParseError> {
-        assert_eq!(
-            parse(&mut Token::lexer("2 % x - yy / 44"))?, 
-            root(op(Sub, op(Mod, nat(2), id("x")), op(Div, id("yy"), nat(44))))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn apposition_addition_conflict() {
-        match parse(&mut Token::lexer("f x + y")) {
-            Err(ParseError::OperatorConflict) => {},
-            _ => panic!("Expected operator conflict")
-        }
-    }
-
-    #[test]
-    fn addition_apposition() -> Result<(), ParseError> {
-        assert_eq!(
-            parse(&mut Token::lexer("x + f y"))?, 
-            root(op(Add, id("x"), op(Apposition, id("f"), id("y"))))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn if_then_else_basic() -> Result<(), ParseError> {
-        assert_eq!(
-            parse(&mut Token::lexer("if x then y else z"))?, 
-            root(if_then_else(id("x"), id("y"), id("z")))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn if_then_else_arithmetic() -> Result<(), ParseError> {
-        assert_eq!(
-            parse(&mut Token::lexer("if w + x then x % y else y * z"))?, 
-            root(if_then_else(op(Add, id("w"), id("x")), op(Mod, id("x"), id("y")), op(Mul, id("y"), id("z"))))
-        );
-        Ok(())
+    fn if_then(condition: impl Into<CST>, case: impl Into<CST>) -> Op {
+        op(If, None, op(Then, condition.into(), case.into()))
     }
 
     fn assert_left_assoc(s: &str, kind: OpKind, id1: CST, id2: CST, id3: CST) -> Result<(), ParseError> {
-        assert_eq!(parse(&mut Token::lexer(s))?, root(op(kind, op(kind, id1, id2), id3)));
-        Ok(())
+        Ok(assert_eq!(parse(&mut Token::lexer(s))?, root(op(kind, op(kind, id1, id2), id3))))
     }
     fn assert_right_assoc(s: &str, kind: OpKind, id1: CST, id2: CST, id3: CST) -> Result<(), ParseError> {
-        assert_eq!(parse(&mut Token::lexer(s))?, root(op(kind, id1, op(kind, id2, id3))));
-        Ok(())
+        Ok(assert_eq!(parse(&mut Token::lexer(s))?, root(op(kind, id1, op(kind, id2, id3)))))
     }
 
-    #[test]
-    fn addition_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x + y + z", Add, id("x"), id("y"), id("z"))
+    mod apposition {
+        use super::*;
+
+        #[test]
+        fn apposition_right_assoc() -> Result<(), ParseError> {
+            assert_right_assoc("x y z", Apposition, id("x"), id("y"), id("z"))
+        }
     }
 
-    #[test]
-    fn subtraction_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x - y - z", Sub, id("x"), id("y"), id("z"))
+    mod brackets {
+        // use super::*;
     }
 
-    #[test]
-    fn multiplication_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x * y * z", Mul, id("x"), id("y"), id("z"))
+    mod arithmetic {
+        use super::*;
+
+        #[test]
+        fn addition_left_assoc() -> Result<(), ParseError> {
+            assert_left_assoc("x + y + z", Add, id("x"), id("y"), id("z"))
+        }
+    
+        #[test]
+        fn subtraction_left_assoc() -> Result<(), ParseError> {
+            assert_left_assoc("x - y - z", Sub, id("x"), id("y"), id("z"))
+        }
+    
+        #[test]
+        fn multiplication_left_assoc() -> Result<(), ParseError> {
+            assert_left_assoc("x * y * z", Mul, id("x"), id("y"), id("z"))
+        }
+    
+        #[test]
+        fn division_left_assoc() -> Result<(), ParseError> {
+            assert_left_assoc("x / y / z", Div, id("x"), id("y"), id("z"))
+        }
+    
+        #[test]
+        fn modulo_left_assoc() -> Result<(), ParseError> {
+            assert_left_assoc("x % y % z", Mod, id("x"), id("y"), id("z"))
+        }
+    
+        #[test]
+        fn arithmetic() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("x * y + z"))?, 
+                root(op(Add, op(Mul, id("x"), id("y")), id("z")))
+            ))
+        }
+    
+        #[test]
+        fn arithmetic_2() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("2 % x - yy / 44"))?, 
+                root(op(Sub, op(Mod, nat(2), id("x")), op(Div, id("yy"), nat(44))))
+            ))
+        }
+    
+        #[test]
+        fn unary_subtraction() -> Result<(), ParseError> {
+            Ok(assert_eq!(parse(&mut Token::lexer("-a * b"))?, root(op(Mul, op(Sub, None, id("a")), id("b")))))
+        }
+    
+        #[test]
+        fn apposition_addition_conflict() {
+            assert_eq!(parse(&mut Token::lexer("f x + y")), Err(ParseError::OperatorConflict));
+        }
+    
+        #[test]
+        fn addition_apposition() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("x + f y"))?, 
+                root(op(Add, id("x"), op(Apposition, id("f"), id("y"))))
+            ))
+        }
+    
     }
 
-    #[test]
-    fn division_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x / y / z", Div, id("x"), id("y"), id("z"))
+    mod if_then_conditionals {
+        use super::*;
+            
+        #[test]
+        fn if_then_else_right_assoc() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("if x then y else z"))?, 
+                root(if_then_else(id("x"), id("y"), id("z")))
+            ))
+        }
+
+        #[test]
+        fn else_if() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("if a then b else if c then d else e"))?,
+                root(if_then_else(id("a"), id("b"), if_then_else(id("c"), id("d"), id("e"))))
+            ))
+        }
+
+        #[test]
+        fn else_apposition_conflict() {
+            assert_eq!(parse(&mut Token::lexer("if a then f else g x")), Err(ParseError::OperatorConflict));
+        }
+
+        #[test]
+        fn if_then_apposition() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("a if f x then g y"))?,
+                root(op(Apposition, id("a"), if_then(
+                    op(Apposition, id("f"), id("x")), 
+                    op(Apposition, id("g"), id("y"))
+                )))
+            ))
+        }
+
+        #[test]
+        fn if_then_else_arithmetic() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("if w + x then x % y else y * z"))?, 
+                root(if_then_else(op(Add, id("w"), id("x")), op(Mod, id("x"), id("y")), op(Mul, id("y"), id("z"))))
+            ))
+        }
     }
 
-    #[test]
-    fn modulo_left_assoc() -> Result<(), ParseError> {
-        assert_left_assoc("x % y % z", Mod, id("x"), id("y"), id("z"))
+    mod func {
+        use super::*;
+        
+        #[test]
+        fn func_right_assoc() -> Result<(), ParseError> {
+            assert_right_assoc("x => y => z", Func, id("x"), id("y"), id("z"))
+        }
+
+        // TODO: figure out semantics for this case, or make it a conflict
+        #[test]
+        fn apposition_func() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("map x => x + x"))?,
+                root(op(Apposition, id("map"), op(Func, id("x"), op(Add, id("x"), id("x")))))
+            ))
+        }
+
+        #[test]
+        fn func_apposition_conflict() {
+            assert_eq!(
+                parse(&mut Token::lexer("a => f x")),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn func_arithmetic() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("A * B => a + b"))?,
+                root(op(Func, op(Mul, id("A"), id("B")), op(Add, id("a"), id("b"))))
+            ))
+        }
+
+        #[test]
+        fn func_if_then_else() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("a => if a then 1 else x"))?,
+                root(op(Func, id("a"), if_then_else(id("a"), nat(1), id("x"))))
+            ))
+        }
+
+        #[test]
+        fn if_func_then_func_else_func() -> Result<(), ParseError> {
+            Ok(assert_eq!(
+                parse(&mut Token::lexer("if a => b then c => d else e => f"))?,
+                root(if_then_else(
+                    op(Func, id("a"), id("b")), 
+                    op(Func, id("c"), id("d")), 
+                    op(Func, id("e"), id("f"))
+                ))
+            ))
+        }
     }
 
-    #[test]
-    fn apposition_right_assoc() -> Result<(), ParseError> {
-        assert_right_assoc("x y z", Apposition, id("x"), id("y"), id("z"))
+    mod colon {
+        // use super::*;
+
+        // #[test]
+        // fn colon_func() -> Result<(), ParseError> {
+        //     Ok(assert_eq!(
+        //         parse(&mut Token::lexer("a: A + B => b: A * B => a + b"))?,
+        //         root(todo!())
+        //     ))
+        // }
+    }
+
+    mod func_type {
+        // use super::*;
+
     }
 }
