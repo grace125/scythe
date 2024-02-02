@@ -27,7 +27,7 @@ const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
 const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
 const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
 const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
-const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, 0);
+const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP);
 
 #[derive(Logos, Debug, PartialEq)]
 #[logos(error = LexingError)]
@@ -639,16 +639,16 @@ mod tests {
 
         // TODO: figure out semantics for this case, or make it a conflict
         #[test]
-        fn apposition_func() {
+        fn apposition_func_conflict() {
             assert_eq!(
-                parse_str("map x => x + x"),
-                root(op(Apposition, id("map"), op(Func, id("x"), op(Add, id("x"), id("x")))))
+                parse_str("map x => x"),
+                Err(ParseError::OperatorConflict)
             )
         }
 
         #[test]
-        fn func_apposition_conflict() {
-            assert_eq!(parse_str("a => f x"), Err(ParseError::OperatorConflict))
+        fn func_apposition() {
+            assert_eq!(parse_str("a => f x"), root(op(Func, id("a"), op(Apposition, id("f"), id("x")))))
         }
 
         #[test]
