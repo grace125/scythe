@@ -2,18 +2,20 @@ use logos::{Logos, Lexer};
 use std::num::{ParseIntError, ParseFloatError};
 pub use OpKind::*;
 
-const BRACE_GROUP: u32              = 0b____________1;
-const IF_GROUP: u32                 = 0b___________10;
-const THEN_GROUP: u32               = 0b__________100;
-const ELSE_GROUP: u32               = 0b_________1000;
-const COLON_LEFT_GROUP: u32         = 0b________10000;
-const COLON_RIGHT_GROUP: u32        = 0b_______100000;
-const FUNC_RIGHT_GROUP: u32         = 0b______1000000;
-const FUNC_LEFT_GROUP: u32          = 0b_____10000000;
-const SUM_GROUP: u32                = 0b____100000000;
-const PROD_GROUP: u32               = 0b___1000000000;
-const APPOSITION_RIGHT_GROUP: u32   = 0b__10000000000;
-const APPOSITION_LEFT_GROUP: u32    = 0b_100000000000;
+const BRACE_GROUP: u32              = 0b______________1;
+const IF_GROUP: u32                 = 0b_____________10;
+const THEN_GROUP: u32               = 0b____________100;
+const ELSE_GROUP: u32               = 0b___________1000;
+const COLON_LEFT_GROUP: u32         = 0b__________10000;
+const COLON_RIGHT_GROUP: u32        = 0b_________100000;
+const FUNC_RIGHT_GROUP: u32         = 0b________1000000;
+const FUNC_LEFT_GROUP: u32          = 0b_______10000000;
+const FUNC_TYPE_RIGHT_GROUP: u32    = 0b______100000000;
+const FUNC_TYPE_LEFT_GROUP: u32     = 0b_____1000000000;
+const SUM_GROUP: u32                = 0b____10000000000;
+const PROD_GROUP: u32               = 0b___100000000000;
+const APPOSITION_RIGHT_GROUP: u32   = 0b__1000000000000;
+const APPOSITION_LEFT_GROUP: u32    = 0b_10000000000000;
 
 const ROOT_SLOT: Slot               = Slot::new(0, 0);
 const BRACE_SLOT: Slot              = Slot::new(BRACE_GROUP, 0);
@@ -24,10 +26,13 @@ const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_GROUP, FUNC_RIGHT_GRO
 const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_GROUP, FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
 const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_GROUP, 0);
 const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
+const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_GROUP, FUNC_LEFT_GROUP);
+const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_GROUP, 0);
 const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
 const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
+const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP | FUNC_TYPE_LEFT_GROUP);
 const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
-const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP);
+
 
 #[derive(Logos, Debug, PartialEq)]
 #[logos(error = LexingError)]
@@ -45,7 +50,7 @@ pub enum Token {
     // #[regex("\"\"")]
     // String,
 
-    #[regex(r"([\[\]{}();:,+*-/%]|=>|if|then|else)", |lex| op_kind_from_str(lex.slice()), priority = 2)]
+    #[regex(r"([\[\]{}();:,+*-/%]|=>|->|if|then|else)", |lex| op_kind_from_str(lex.slice()), priority = 2)]
     Op(OpKind),
 }
 
@@ -66,6 +71,7 @@ fn op_kind_from_str(s: &str) -> OpKind {
         "then" => OpKind::Then,
         "else" => OpKind::Else,
         "=>" => OpKind::Func,
+        "->" => OpKind::FuncType,
         ":" => OpKind::Colon,
         _ => unreachable!()
     }
@@ -109,6 +115,7 @@ pub enum OpKind {
     Then,
     Else,
     Func,
+    FuncType,
     Colon,
     Apposition,
     Root,
@@ -183,6 +190,7 @@ impl Op {
             OpKind::Then => Some(THEN_SLOT),
             OpKind::Else => Some(ELSE_SLOT),
             OpKind::Func => Some(FUNC_LEFT_SLOT),
+            OpKind::FuncType => Some(FUNC_TYPE_LEFT_SLOT),
             OpKind::Colon => Some(COLON_LEFT_SLOT),
         }
     }
@@ -201,6 +209,7 @@ impl Op {
             OpKind::Then => Some(THEN_SLOT),
             OpKind::Else => Some(ELSE_SLOT),
             OpKind::Func => Some(FUNC_RIGHT_SLOT),
+            OpKind::FuncType => Some(FUNC_TYPE_RIGHT_SLOT),
             OpKind::Colon => Some(COLON_RIGHT_SLOT)
         }
     }
@@ -680,6 +689,73 @@ mod tests {
         }
     }
 
+    mod func_type {
+        use super::*;
+
+        #[test]
+        fn func_type_right_assoc() {
+            assert_right_assoc("x -> y -> z", FuncType, id("x"), id("y"), id("z"))
+        }
+
+        // TODO: figure out semantics for this case, or make it a conflict
+        #[test]
+        fn apposition_func_type_conflict() {
+            assert_eq!(
+                parse_str("map x -> x"),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn func_type_apposition() {
+            assert_eq!(parse_str("a -> f x"), root(op(FuncType, id("a"), op(Apposition, id("f"), id("x")))))
+        }
+
+        #[test]
+        fn func_type_arithmetic() {
+            assert_eq!(
+                parse_str("A * B -> A + B"),
+                root(op(FuncType, op(Mul, id("A"), id("B")), op(Add, id("A"), id("B"))))
+            )
+        }
+
+        #[test]
+        fn func_type_if_then_else() {
+            assert_eq!(
+                parse_str("a -> if a then A else B"),
+                root(op(FuncType, id("a"), if_then_else(id("a"), id("A"), id("B"))))
+            )
+        }
+
+        #[test]
+        fn if_func_type_then_func_type_else_func_type() {
+            assert_eq!(
+                parse_str("if A -> B then C -> D else E -> F"),
+                root(if_then_else(
+                    op(FuncType, id("A"), id("B")), 
+                    op(FuncType, id("C"), id("D")), 
+                    op(FuncType, id("E"), id("F"))
+                ))
+            )
+        }
+
+        #[test]
+        fn func_func_type() {
+            assert_eq!(
+                parse_str("A => A -> B"),
+                root(op(Func, id("A"), op(FuncType, id("A"), id("B"))))
+            )
+        }
+
+        #[test]
+        fn func_type_func_conflict() {
+            assert_eq!(
+                parse_str("A -> B => B"),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+    }
+
     mod colon {
         use super::*;
 
@@ -764,10 +840,22 @@ mod tests {
                 Err(ParseError::OperatorConflict)
             )
         }
+
+        #[test]
+        fn colon_func_type() {
+            assert_eq!(
+                parse_str("f: A -> B"),
+                root(op(Colon, id("f"), op(FuncType, id("A"), id("B"))))
+            )
+        }
+
+        #[test]
+        fn func_type_colon() {
+            assert_eq!(
+                parse_str("A -> B: Type"),
+                root(op(Colon, op(FuncType, id("A"), id("B")), id("Type")))
+            )
+        }
     }
 
-    mod func_type {
-        // use super::*;
-
-    }
 }
