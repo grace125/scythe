@@ -1,124 +1,67 @@
-use logos::{Logos, Lexer};
-use std::num::{ParseIntError, ParseFloatError};
+use super::lexing::{OpKind, LexingError};
 pub use OpKind::*;
 
-const BRACE_GROUP: u32              = 0b______________1;
-const IF_GROUP: u32                 = 0b_____________10;
-const THEN_GROUP: u32               = 0b____________100;
-const ELSE_GROUP: u32               = 0b___________1000;
-const COLON_LEFT_GROUP: u32         = 0b__________10000;
-const COLON_RIGHT_GROUP: u32        = 0b_________100000;
-const FUNC_RIGHT_GROUP: u32         = 0b________1000000;
-const FUNC_LEFT_GROUP: u32          = 0b_______10000000;
-const FUNC_TYPE_RIGHT_GROUP: u32    = 0b______100000000;
-const FUNC_TYPE_LEFT_GROUP: u32     = 0b_____1000000000;
-const SUM_GROUP: u32                = 0b____10000000000;
-const PROD_GROUP: u32               = 0b___100000000000;
-const APPOSITION_RIGHT_GROUP: u32   = 0b__1000000000000;
-const APPOSITION_LEFT_GROUP: u32    = 0b_10000000000000;
+const BRACE_GROUP: u32              = 0b_______________________________1;
+const SEMICOLON_RIGHT_GROUP: u32    = 0b______________________________10;
+const SEMICOLON_LEFT_GROUP: u32     = 0b_____________________________100;
+const IF_GROUP: u32                 = 0b____________________________1000;
+const THEN_GROUP: u32               = 0b___________________________10000;
+const ELSE_GROUP: u32               = 0b__________________________100000;
+const COLON_LEFT_GROUP: u32         = 0b_________________________1000000;
+const COLON_RIGHT_GROUP: u32        = 0b________________________10000000;
+const FUNC_RIGHT_GROUP: u32         = 0b_______________________100000000;
+const FUNC_LEFT_GROUP: u32          = 0b______________________1000000000;
+const FUNC_TYPE_RIGHT_GROUP: u32    = 0b_____________________10000000000;
+const FUNC_TYPE_LEFT_GROUP: u32     = 0b____________________100000000000;
+const SUM_GROUP: u32                = 0b___________________1000000000000;
+const PROD_GROUP: u32               = 0b__________________10000000000000;
+const APPOSITION_RIGHT_GROUP: u32   = 0b_________________100000000000000;
+const APPOSITION_LEFT_GROUP: u32    = 0b________________1000000000000000;
+const NO_SLOT_GROUP: u32            = 0b10000000000000000000000000000000;
 
-const ROOT_SLOT: Slot               = Slot::new(0, 0);
-const BRACE_SLOT: Slot              = Slot::new(BRACE_GROUP, 0);
-const IF_SLOT: Slot                 = Slot::new(IF_GROUP, 0);
-const THEN_SLOT: Slot               = Slot::new(THEN_GROUP, 0);
-const ELSE_SLOT: Slot               = Slot::new(ELSE_GROUP, 0);
-const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_GROUP, FUNC_RIGHT_GROUP | ELSE_GROUP);
-const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_GROUP, FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
-const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_GROUP, 0);
-const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
-const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_GROUP, FUNC_LEFT_GROUP);
-const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_GROUP, 0);
-const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
-const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
-const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP | FUNC_TYPE_LEFT_GROUP);
-const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
-
-
-#[derive(Logos, Debug, PartialEq)]
-#[logos(error = LexingError)]
-#[logos(skip r"[ \t\n\f]+")]
-pub enum Token {
-    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*", |lex| lex.slice().to_string(), priority = 1)]
-    Id(String),
-
-    #[regex(r"[0-9]+", |lex| lex.slice().parse(), priority = 2)] 
-    Nat(u64),
-
-    #[regex(r"[0-9]+\.[0-9]*", |lex| lex.slice().parse(), priority = 2)]
-    Float(f64),
-
-    // #[regex("\"\"")]
-    // String,
-
-    #[regex(r"([\[\]{}();:,+*-/%]|=>|->|if|then|else)", |lex| op_kind_from_str(lex.slice()), priority = 2)]
-    Op(OpKind),
+pub struct Slot {
+    precedence: u32,
+    conflicts: u32,
 }
 
-fn op_kind_from_str(s: &str) -> OpKind {
-    match s {
-        "{" => OpKind::BraceStart,
-        "}" => OpKind::BraceEnd,
-        "[" => OpKind::BracketStart,
-        "]" => OpKind::BracketEnd,
-        "(" => OpKind::ParenthesisStart,
-        ")" => OpKind::ParenthesisEnd,
-        "+" => OpKind::Add,
-        "*" => OpKind::Mul,
-        "-" => OpKind::Sub,
-        "/" => OpKind::Div,
-        "%" => OpKind::Mod,
-        "if" => OpKind::If,
-        "then" => OpKind::Then,
-        "else" => OpKind::Else,
-        "=>" => OpKind::Func,
-        "->" => OpKind::FuncType,
-        ":" => OpKind::Colon,
-        _ => unreachable!()
+impl Slot {
+    pub const ROOT_SLOT: Slot               = Slot::new(0, 0);
+    pub const BRACE_SLOT: Slot              = Slot::new(BRACE_GROUP, 0);
+    pub const SEMICOLON_LEFT_SLOT: Slot     = Slot::new(SEMICOLON_LEFT_GROUP, 0);
+    pub const SEMICOLON_RIGHT_SLOT: Slot    = Slot::new(SEMICOLON_RIGHT_GROUP, 0);
+    pub const IF_SLOT: Slot                 = Slot::new(IF_GROUP, 0);
+    pub const THEN_SLOT: Slot               = Slot::new(THEN_GROUP, 0);
+    pub const ELSE_SLOT: Slot               = Slot::new(ELSE_GROUP, 0);
+    pub const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_GROUP, FUNC_RIGHT_GROUP | ELSE_GROUP);
+    pub const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_GROUP, FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
+    pub const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_GROUP, 0);
+    pub const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
+    pub const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_GROUP, FUNC_LEFT_GROUP);
+    pub const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_GROUP, 0);
+    pub const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
+    pub const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
+    pub const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP | FUNC_TYPE_LEFT_GROUP);
+    pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
+    pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_GROUP, 0);
+
+    const fn new(precedence: u32, conflicts: u32) -> Self {
+        Slot { precedence, conflicts }
+    }
+
+    fn takes_precedence_over(&self, other: &Slot) -> Result<bool, ParseError> {
+        if (self.precedence & other.conflicts) | (other.precedence & self.conflicts) != 0 {
+            Err(ParseError::OperatorConflict)
+        }
+        else {
+            Ok(self.precedence >= other.precedence)
+        }
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
-pub enum LexingError {
-    InvalidNatLiteral,
-    InvalidFloatLiteral,
-
-    #[default]
-    NonAsciiCharacter,
-}
-
-impl From<ParseIntError> for LexingError {
-    fn from(_value: ParseIntError) -> Self {
-        LexingError::InvalidNatLiteral
+impl PartialEq for Slot {
+    fn eq(&self, other: &Self) -> bool {
+        self.precedence == other.precedence
     }
-}
-
-impl From<ParseFloatError> for LexingError {
-    fn from(_value: ParseFloatError) -> Self {
-        LexingError::InvalidFloatLiteral
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum OpKind {
-    BraceStart,
-    BraceEnd,
-    BracketStart,
-    BracketEnd,
-    ParenthesisStart,
-    ParenthesisEnd,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    If,
-    Then,
-    Else,
-    Func,
-    FuncType,
-    Colon,
-    Apposition,
-    Root,
 }
 
 #[derive(Clone, PartialEq)]
@@ -128,8 +71,80 @@ pub struct Op {
     right: Option<Box<CST>>
 }
 
-pub fn op(kind: OpKind, left: impl Into<Option<Box<CST>>>, right: impl Into<Option<Box<CST>>>) -> Op {
-    Op { kind, left: left.into(), right: right.into() }
+impl Op {
+    pub fn new(kind: OpKind) -> Op {
+        Op { kind, left: None, right: None }
+    }
+
+    pub fn left_slot(&self) -> Slot {
+        if self.left.is_some() { return Slot::NO_SLOT; }
+        match self.kind {
+            OpKind::BraceStart | 
+            OpKind::BracketStart | 
+            OpKind::ParenthesisStart |
+            OpKind::If                  => Slot::NO_SLOT,
+            OpKind::BraceEnd | 
+            OpKind::BracketEnd | 
+            OpKind::ParenthesisEnd      => Slot::BRACE_SLOT,
+            OpKind::Add | 
+            OpKind::Sub                 => Slot::SUM_SLOT,
+            OpKind::Mul | 
+            OpKind::Div | 
+            OpKind::Mod                 => Slot::PROD_SLOT,
+            OpKind::Apposition          => Slot::APPOSITION_LEFT_SLOT,
+            OpKind::Root                => Slot::ROOT_SLOT,
+            OpKind::Then                => Slot::THEN_SLOT,
+            OpKind::Else                => Slot::ELSE_SLOT,
+            OpKind::Semicolon           => Slot::SEMICOLON_LEFT_SLOT,
+            OpKind::Func                => Slot::FUNC_LEFT_SLOT,
+            OpKind::FuncType            => Slot::FUNC_TYPE_LEFT_SLOT,
+            OpKind::Colon               => Slot::COLON_LEFT_SLOT,
+        }
+    }
+
+    pub fn right_slot(&self) -> Slot {
+        if self.right.is_some() { return Slot::NO_SLOT; }
+        match self.kind {
+            OpKind::BraceStart | 
+            OpKind::BracketStart | 
+            OpKind::ParenthesisStart    => Slot::BRACE_SLOT,
+            OpKind::BraceEnd | 
+            OpKind::BracketEnd | 
+            OpKind::ParenthesisEnd      => Slot::NO_SLOT,
+            OpKind::Add | 
+            OpKind::Sub                 => if self.left.is_some() { Slot::SUM_SLOT } else { Slot::PROD_SLOT },
+            OpKind::Mul | 
+            OpKind::Div | 
+            OpKind::Mod                 => Slot::PROD_SLOT,
+            OpKind::Apposition          => Slot::APPOSITION_RIGHT_SLOT,
+            OpKind::Root                => Slot::ROOT_SLOT,
+            OpKind::If                  => Slot::IF_SLOT,
+            OpKind::Then                => Slot::THEN_SLOT,
+            OpKind::Else                => Slot::ELSE_SLOT,
+            OpKind::Semicolon           => Slot::SEMICOLON_RIGHT_SLOT,
+            OpKind::Func                => Slot::FUNC_RIGHT_SLOT,
+            OpKind::FuncType            => Slot::FUNC_TYPE_RIGHT_SLOT,
+            OpKind::Colon               => Slot::COLON_RIGHT_SLOT
+        }
+    }
+
+    fn takes_precedence_over(&self, other: &Op) -> Result<bool, ParseError> {
+        self.right_slot().takes_precedence_over(&other.left_slot())
+    }
+
+    fn update_left(&mut self, l: Option<Box<CST>>) {
+        if l.is_some() {
+            debug_assert!(self.left.is_none());
+            self.left = l;
+        }
+    }
+
+    fn update_right(&mut self, r: Option<Box<CST>>) {
+        if r.is_some() {
+            debug_assert!(self.right.is_none());
+            self.right = r;
+        }
+    }
 }
 
 impl std::fmt::Debug for Op {
@@ -169,69 +184,9 @@ impl Into<Option<Box<CST>>> for Op {
     }
 }
 
-impl Op {
-    pub fn new(kind: OpKind) -> Op {
-        Op { 
-            kind, 
-            left: None,
-            right: None 
-        }
-    }
-
-    fn left_slot(&self) -> Option<Slot> {
-        match self.kind {
-            OpKind::BraceStart | OpKind::BracketStart | OpKind::ParenthesisStart => None,
-            OpKind::BraceEnd   | OpKind::BracketEnd   | OpKind::ParenthesisEnd   => Some(BRACE_SLOT),
-            OpKind::Add | OpKind::Sub               => Some(SUM_SLOT),
-            OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_SLOT),
-            OpKind::Apposition => Some(APPOSITION_LEFT_SLOT),
-            OpKind::Root => Some(ROOT_SLOT),
-            OpKind::If => None,
-            OpKind::Then => Some(THEN_SLOT),
-            OpKind::Else => Some(ELSE_SLOT),
-            OpKind::Func => Some(FUNC_LEFT_SLOT),
-            OpKind::FuncType => Some(FUNC_TYPE_LEFT_SLOT),
-            OpKind::Colon => Some(COLON_LEFT_SLOT),
-        }
-    }
-
-    fn right_slot(&self) -> Option<Slot> {
-        match self.kind {
-            OpKind::BraceStart | OpKind::BracketStart | OpKind::ParenthesisStart => Some(BRACE_SLOT),
-            OpKind::BraceEnd   | OpKind::BracketEnd   | OpKind::ParenthesisEnd   => None,
-            OpKind::Add | OpKind::Sub => Some(
-                if self.left.is_none() { PROD_SLOT } else { SUM_SLOT }
-            ),
-            OpKind::Mul | OpKind::Div | OpKind::Mod => Some(PROD_SLOT),
-            OpKind::Apposition => Some(APPOSITION_RIGHT_SLOT),
-            OpKind::Root => Some(ROOT_SLOT),
-            OpKind::If => Some(IF_SLOT),
-            OpKind::Then => Some(THEN_SLOT),
-            OpKind::Else => Some(ELSE_SLOT),
-            OpKind::Func => Some(FUNC_RIGHT_SLOT),
-            OpKind::FuncType => Some(FUNC_TYPE_RIGHT_SLOT),
-            OpKind::Colon => Some(COLON_RIGHT_SLOT)
-        }
-    }
-}
-
-pub struct Slot {
-    precedence: u32,
-    conflicts: u32,
-}
-
-impl Slot {
-    const fn new(precedence: u32, conflicts: u32) -> Self {
-        Slot { precedence, conflicts }
-    }
-
-    fn takes_precedence_over(&self, other: &Slot) -> Result<bool, ParseError> {
-        if (self.precedence & other.conflicts) | (other.precedence & self.conflicts) != 0 {
-            Err(ParseError::OperatorConflict)
-        }
-        else {
-            Ok(self.precedence >= other.precedence)
-        }
+impl From<OpKind> for Op {
+    fn from(value: OpKind) -> Op {
+        Op::new(value)
     }
 }
 
@@ -241,6 +196,20 @@ pub enum CST {
     Nat(u64),
     Float(f64),
     Id(String),
+}
+
+impl CST {
+    pub fn id_from(s: impl Into<String>) -> Self {
+        CST::Id(s.into())
+    }
+
+    pub fn op_from(k: impl Into<Op>) -> Self {
+        CST::Op(k.into())
+    }
+
+    pub fn nat_from(n: u64) -> Self {
+        CST::Nat(n)
+    }
 }
 
 impl std::fmt::Debug for CST {
@@ -260,126 +229,76 @@ impl Into<Option<Box<CST>>> for CST {
     }
 }
 
-pub fn parse(lex: &mut Lexer<Token>) -> Result<CST, ParseError> {
-    _parse(lex, Op::new(OpKind::Root), None).map(|op| CST::Op(op))
-}
+pub fn parse<L: Iterator<Item = Result<CST, LexingError>>>(lex: &mut L) -> Result<Option<Box<CST>>, ParseError> {
+    let (first_item, first_op) = next(lex, None)?;
 
-fn _parse(lex: &mut Lexer<Token>, mut last_op: Op, item: Option<Box<CST>>) -> Result<Op, ParseError> {
-    let next_token = match lex.next() {
-        Some(Ok(t)) => t,
-        Some(Err(e)) => return Err(ParseError::from(e)),
-        None => { 
-            last_op.right = item;
-            return Ok(last_op);
-        }, 
+    let Some(mut first_op) = first_op else {
+        return Ok(first_item);
     };
 
-    match next_token {
-        Token::Nat(n)   => parse_literal(lex, last_op, item, CST::Nat(n)),
-        Token::Float(f) => parse_literal(lex, last_op, item, CST::Float(f)),
-        Token::Id(id)   => parse_literal(lex, last_op, item, CST::Id(id)),
-        Token::Op(op_kind) => {
-            let mut this_op = Op::new(op_kind);
-            match (last_op.right_slot(), item, this_op.left_slot()) {
-                (Some(last_slot), item, Some(this_slot)) => parse_comparison(lex, last_op, last_slot, this_op, this_slot, item, None),
-                (None, None, Some(_)) => {
-                    // dbg!("case 1");
-                    this_op.left = Some(Box::new(CST::Op(last_op)));
-                    _parse(lex, this_op, None)
-                },
-                (None, Some(item), Some(this_slot)) => {
-                    // dbg!("case 2");
-                    let last_op = Op {
-                        kind: OpKind::Apposition, 
-                        left: last_op.into(), 
-                        right: None
-                    };
-                    parse_comparison(lex, last_op, APPOSITION_RIGHT_SLOT, this_op, this_slot, Some(item), None)
-                },
-                (Some(_), None, None) => {
-                    // dbg!("case 3");
-                    last_op.right = _parse(lex, this_op, None)?.into();
-                    Ok(last_op)
-                },
-                (Some(last_slot), Some(item), None) => {
-                    // dbg!("case 4");
-                    let next_item = Some(_parse(lex, this_op, None)?.into());
-                    let apposition = Op {
-                        kind: OpKind::Apposition,
-                        left: None,
-                        right: None,
-                    };
-                    parse_comparison(lex, last_op, last_slot, apposition, APPOSITION_LEFT_SLOT, Some(item), next_item)
-                },
-                (None, None, None) => {
-                    // dbg!("case 5");
-                    Ok(Op { 
-                        kind: OpKind::Apposition, 
-                        left: last_op.into(), 
-                        right: _parse(lex, this_op, None)?.into()
-                    })
-                },
-                (None, Some(item), None) => {
-                    // dbg!("case 6");
-                    Ok(Op {
-                        kind: OpKind::Apposition,
-                        left: last_op.into(),
-                        right: Op {
-                            kind: OpKind::Apposition,
-                            left: item.into(),
-                            right: _parse(lex, this_op, None)?.into()
-                        }.into()
-                    })
-                }
+    first_op.left = first_item;
+
+    loop {
+        let (new_item, new_op) = parse_inner(lex, first_op)?;
+        match new_op {
+            None => break Ok(new_item),
+            Some(mut new_op) => {
+                new_op.update_left(new_item);
+                first_op = new_op;
             }
         }
     }
 }
 
-#[inline]
-fn parse_literal(lex: &mut Lexer<Token>, last_op: Op, item: Option<Box<CST>>, literal: CST) -> Result<Op, ParseError> {
-    if item.is_some() {
-        match last_op.right_slot() {
-            Some(last_slot) => parse_comparison(
-                lex, 
-                last_op, last_slot, 
-                Op::new(OpKind::Apposition), APPOSITION_LEFT_SLOT, 
-                item, Some(Box::new(literal))
-            ),
-            None => {
-                let this_op = Op {
-                    kind: OpKind::Apposition,
-                    left: Some(Box::new(CST::Op(last_op))),
-                    right: None
-                };
-                _parse(lex, this_op, Some(Box::new(literal)))
-            }
+fn parse_inner<L>(lex: &mut L, mut prev_op: Op) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> 
+where L: Iterator<Item = Result<CST, LexingError>>
+{
+    let (mut this_item, mut maybe_this_op) = next(lex, None)?;
+
+    loop {
+        let Some(mut this_op) = maybe_this_op else {
+            prev_op.update_right(this_item);
+            return Ok((prev_op.into(), None));
+        };
+
+        if prev_op.takes_precedence_over(&this_op)? {
+            break return_inner(prev_op, this_item, this_op)
         }
+
+        this_op.update_left(this_item);
+    
+        (this_item, maybe_this_op) = parse_inner(lex, this_op)?;
     }
-    else {
-        _parse(lex, last_op, Some(Box::new(literal)))
-    }
+
 }
 
-#[inline]
-fn parse_comparison(
-    lex: &mut Lexer<Token>, 
-    mut last_op: Op,  last_slot: Slot, 
-    mut this_op: Op,  this_slot: Slot, 
-    item: Option<Box<CST>>, next_item: Option<Box<CST>>
-) -> Result<Op, ParseError> {
-    if last_slot.takes_precedence_over(&this_slot)? {
-        last_op.right = item;
+fn return_inner(mut last_op: Op, item: Option<Box<CST>>, mut this_op: Op) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> {
+    last_op.update_right(item);
+    if last_op.kind == OpKind::BraceStart && this_op.kind == OpKind::BraceEnd
+    || last_op.kind == OpKind::BracketStart && this_op.kind == OpKind::BracketEnd
+    || last_op.kind == OpKind::ParenthesisStart && this_op.kind == OpKind::ParenthesisEnd {
+        
         this_op.left = last_op.into();
-        _parse(lex, this_op, next_item)
+        Ok((None, Some(this_op)))
     }
     else {
-        this_op.left = item;
-        last_op.right = _parse(lex, this_op, next_item)?.into();
-        Ok(last_op)
+        Ok((last_op.into(), Some(this_op)))
     }
 }
 
+fn next<L>(lex: &mut L, item: Option<Box<CST>>) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> 
+where L: Iterator<Item = Result<CST, LexingError>>
+{
+    match lex.next() {
+        Some(Ok(CST::Op(op))) => Ok((item, Some(op))),
+        Some(Err(e)) => Err(e.into()),
+        Some(Ok(new_item)) => {
+            debug_assert!(item.is_none());
+            next(lex, new_item.into())
+        },
+        None => Ok((item, None))
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
@@ -399,24 +318,23 @@ impl From<LexingError> for ParseError {
 
 #[cfg(test)]
 mod tests {
-    use logos::Logos;
-
     use super::*;
     use helpers::*;
+    use crate::lexing::lex;
 
     mod helpers {
         use super::*;
 
-        pub fn parse_str(s: &str) -> Result<CST, ParseError> {
-            parse(&mut Token::lexer(s))
+        pub fn parse_str(s: &str) -> Result<Option<Box<CST>>, ParseError> {
+            parse(&mut lex(s))
         }
     
-        pub fn root(op: Op) -> Result<CST, ParseError> {
-            Ok(CST::Op(Op {
-                kind: OpKind::Root,
-                left: None,
-                right: op.into()
-            }))
+        pub fn root(op: Op) -> Result<Option<Box<CST>>, ParseError> {
+            Ok(op.into())
+        }
+
+        pub fn op(kind: OpKind, left: impl Into<Option<Box<CST>>>, right: impl Into<Option<Box<CST>>>) -> Op {
+            Op { kind, left: left.into(), right: right.into() }
         }
     
         pub fn id(s: &str) -> CST {
@@ -547,7 +465,6 @@ mod tests {
             assert_eq!(parse_str("(x)"), root(parenthesis(id("x"))))
         }
 
-        // Tests "case 1" in parse
         #[test]
         fn parens_arithmetic() {
             assert_eq!(
@@ -556,7 +473,6 @@ mod tests {
             )
         }
 
-        // Tests "case 2" in parse
         #[test]
         fn parens_item_arithmetic() {
             assert_eq!(parse_str("(f) 3 + 5"), root(op(Add, op(Apposition, parenthesis(id("f")), nat(3)), nat(5))))
@@ -592,6 +508,24 @@ mod tests {
             )
         }
 
+        #[test]
+        fn parens_around_arithmetic() {
+            assert_eq!(
+                parse_str("(a + b)"),
+                root(parenthesis(op(Add, id("a"), id("b"))))
+            )
+        }
+
+        #[test]
+        fn parens_around_arithmetic_arithmetic() {
+            assert_eq!(
+                parse_str("(a + b) + (c + d)"),
+                root(op(Add, 
+                    parenthesis(op(Add, id("a"), id("b"))), 
+                    parenthesis(op(Add, id("c"), id("d")))
+                ))
+            )
+        }
     }
 
     mod if_then_conditionals {
@@ -858,4 +792,64 @@ mod tests {
         }
     }
 
+    mod semicolon {
+        use super::*;
+
+        #[test]
+        fn semicolon_right_assoc() {
+            assert_right_assoc("a; b ; c", Semicolon, id("a"), id("b"), id("c"))
+        }
+
+        #[test]
+        fn semicolon_apposition() {
+            assert_eq!(
+                parse_str("f x; g y"),
+                root(op(Semicolon, op(Apposition, id("f"), id("x")), op(Apposition, id("g"), id("y"))))
+            )
+        }
+
+        #[test]
+        fn semicolon_arithmetic() {
+            assert_eq!(
+                parse_str("a + b; c * d"),
+                root(op(Semicolon, op(Add, id("a"), id("b")), op(Mul, id("c"), id("d"))))
+            )
+        }
+
+        #[test]
+        fn semicolon_parens() {
+            assert_eq!(
+                parse_str("(a + b; c); {d - e}"),
+                root(op(Semicolon, 
+                    parenthesis(op(Semicolon, op(Add, id("a"), id("b")), id("c"))), 
+                    brace(op(Sub, id("d"), id("e")))
+                ))
+            )
+        }
+
+        // TODO: find a way to have a conflict that doesn't ruin if_then_semicolon (?)
+        // #[test]
+        // fn if_semicolon_conflict() {
+        //     assert_eq!(
+        //         parse_str("if a; b then c else d"),
+        //         Err(ParseError::OperatorConflict)
+        //     )
+        // }
+
+        #[test]
+        fn if_then_semicolon() {
+            assert_eq!(
+                parse_str("if a then b; c"),
+                root(op(Semicolon, if_then(id("a"), id("b")), id("c")))
+            )
+        }
+
+        #[test]
+        fn else_semicolon() {
+            assert_eq!(
+                parse_str("if a then b else c; d"),
+                root(op(Semicolon, if_then_else(id("a"), id("b"), id("c")), id("d")))
+            )
+        }
+    }
 }
