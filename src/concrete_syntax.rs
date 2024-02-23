@@ -20,23 +20,17 @@ const APPOSITION_RIGHT_PRECEDENCE: u32  = 15;
 const APPOSITION_LEFT_PRECEDENCE: u32   = 16;
 const NO_SLOT_PRECEDENCE: u32           = u32::MAX;
 
-const BRACE_GROUP: u32              = 0b_______________________________1;
-const SEMICOLON_RIGHT_GROUP: u32    = 0b______________________________10;
-const SEMICOLON_LEFT_GROUP: u32     = 0b_____________________________100;
-const IF_GROUP: u32                 = 0b____________________________1000;
-const THEN_GROUP: u32               = 0b___________________________10000;
-const ELSE_GROUP: u32               = 0b__________________________100000;
-const COLON_LEFT_GROUP: u32         = 0b_________________________1000000;
-const COLON_RIGHT_GROUP: u32        = 0b________________________10000000;
-const FUNC_RIGHT_GROUP: u32         = 0b_______________________100000000;
-const FUNC_LEFT_GROUP: u32          = 0b______________________1000000000;
-const FUNC_TYPE_RIGHT_GROUP: u32    = 0b_____________________10000000000;
-const FUNC_TYPE_LEFT_GROUP: u32     = 0b____________________100000000000;
-const SUM_GROUP: u32                = 0b___________________1000000000000;
-const PROD_GROUP: u32               = 0b__________________10000000000000;
-const APPOSITION_RIGHT_GROUP: u32   = 0b_________________100000000000000;
-const APPOSITION_LEFT_GROUP: u32    = 0b________________1000000000000000;
-const NO_SLOT_GROUP: u32            = 0b10000000000000000000000000000000;
+const BRACE_GROUP: u32              = 0b____________1;
+const SEMICOLON_GROUP: u32          = 0b___________10;
+const IF_GROUP: u32                 = 0b__________100;
+const THEN_GROUP: u32               = 0b_________1000;
+const ELSE_GROUP: u32               = 0b________10000;
+const COLON_GROUP: u32              = 0b_______100000;
+const FUNC_GROUP: u32               = 0b______1000000;
+const FUNC_TYPE_GROUP: u32          = 0b_____10000000;
+const SUM_GROUP: u32                = 0b____100000000;
+const PROD_GROUP: u32               = 0b___1000000000;
+const APPOSITION_GROUP: u32         = 0b__10000000000;
 
 pub struct Slot {
     precedence: u32,
@@ -47,22 +41,22 @@ pub struct Slot {
 impl Slot {
     pub const ROOT_SLOT: Slot               = Slot::new(TEMPLATE_PRECEDENCE,            0,                      0);
     pub const BRACE_SLOT: Slot              = Slot::new(BRACE_PRECEDENCE,               BRACE_GROUP,            0);
-    pub const SEMICOLON_LEFT_SLOT: Slot     = Slot::new(SEMICOLON_LEFT_PRECEDENCE,      SEMICOLON_LEFT_GROUP,   0);
-    pub const SEMICOLON_RIGHT_SLOT: Slot    = Slot::new(SEMICOLON_RIGHT_PRECEDENCE,     SEMICOLON_RIGHT_GROUP,  0);
+    pub const SEMICOLON_LEFT_SLOT: Slot     = Slot::new(SEMICOLON_LEFT_PRECEDENCE,      SEMICOLON_GROUP,        0);
+    pub const SEMICOLON_RIGHT_SLOT: Slot    = Slot::new(SEMICOLON_RIGHT_PRECEDENCE,     SEMICOLON_GROUP,        0);
     pub const IF_SLOT: Slot                 = Slot::new(IF_PRECEDENCE,                  IF_GROUP,               0);
     pub const THEN_SLOT: Slot               = Slot::new(THEN_PRECEDENCE,                THEN_GROUP,             0);
     pub const ELSE_SLOT: Slot               = Slot::new(ELSE_PRECEDENCE,                ELSE_GROUP,             0);
-    pub const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_PRECEDENCE,          COLON_LEFT_GROUP,       FUNC_RIGHT_GROUP | ELSE_GROUP);
-    pub const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_PRECEDENCE,         COLON_RIGHT_GROUP,      FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
-    pub const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_PRECEDENCE,          FUNC_RIGHT_GROUP,       0);
-    pub const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_PRECEDENCE,           FUNC_LEFT_GROUP,        0);
-    pub const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_PRECEDENCE,     FUNC_TYPE_RIGHT_GROUP,  FUNC_LEFT_GROUP);
-    pub const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_PRECEDENCE,      FUNC_TYPE_LEFT_GROUP,   0);
+    pub const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_PRECEDENCE,          COLON_GROUP,            FUNC_GROUP | ELSE_GROUP);
+    pub const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_PRECEDENCE,         COLON_GROUP,            FUNC_GROUP | SUM_GROUP | PROD_GROUP);
+    pub const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_PRECEDENCE,          FUNC_GROUP,             0);
+    pub const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_PRECEDENCE,           FUNC_GROUP,             0);
+    pub const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_PRECEDENCE,     FUNC_TYPE_GROUP,        FUNC_GROUP);
+    pub const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_PRECEDENCE,      FUNC_TYPE_GROUP,        0);
     pub const SUM_SLOT: Slot                = Slot::new(SUM_PRECEDENCE,                 SUM_GROUP,              0);
     pub const PROD_SLOT: Slot               = Slot::new(PROD_PRECEDENCE,                PROD_GROUP,             0);
-    pub const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_PRECEDENCE,    APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP | FUNC_TYPE_LEFT_GROUP);
-    pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_PRECEDENCE,     APPOSITION_LEFT_GROUP,  ELSE_GROUP);
-    pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_PRECEDENCE,             NO_SLOT_GROUP,          0);
+    pub const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_PRECEDENCE,    APPOSITION_GROUP,       FUNC_GROUP | FUNC_TYPE_GROUP);
+    pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_PRECEDENCE,     APPOSITION_GROUP,       ELSE_GROUP);
+    pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_PRECEDENCE,             0,                      0);
 
     const fn new(precedence: u32, conflict_groups: u32, conflict_masks: u32) -> Self {
         Slot { precedence, conflict_groups, conflict_masks }
