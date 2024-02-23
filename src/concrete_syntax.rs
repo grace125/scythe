@@ -1,6 +1,25 @@
 use super::lexing::{OpKind, LexingError};
 pub use OpKind::*;
 
+const TEMPLATE_PRECEDENCE: u32          = 0;
+const BRACE_PRECEDENCE: u32             = 1;
+const SEMICOLON_RIGHT_PRECEDENCE: u32   = 2;
+const SEMICOLON_LEFT_PRECEDENCE: u32    = 3;
+const IF_PRECEDENCE: u32                = 4;
+const THEN_PRECEDENCE: u32              = 5;
+const ELSE_PRECEDENCE: u32              = 6;
+const COLON_RIGHT_PRECEDENCE: u32       = 7;
+const COLON_LEFT_PRECEDENCE: u32        = 8;
+const FUNC_RIGHT_PRECEDENCE: u32        = 9;
+const FUNC_LEFT_PRECEDENCE: u32         = 10;
+const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 11;
+const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 12;
+const SUM_PRECEDENCE: u32               = 13;
+const PROD_PRECEDENCE: u32              = 14;
+const APPOSITION_RIGHT_PRECEDENCE: u32  = 15;
+const APPOSITION_LEFT_PRECEDENCE: u32   = 16;
+const NO_SLOT_PRECEDENCE: u32           = u32::MAX;
+
 const BRACE_GROUP: u32              = 0b_______________________________1;
 const SEMICOLON_RIGHT_GROUP: u32    = 0b______________________________10;
 const SEMICOLON_LEFT_GROUP: u32     = 0b_____________________________100;
@@ -21,40 +40,45 @@ const NO_SLOT_GROUP: u32            = 0b10000000000000000000000000000000;
 
 pub struct Slot {
     precedence: u32,
-    conflicts: u32,
+    conflict_groups: u32,
+    conflict_masks: u32
 }
 
 impl Slot {
-    pub const ROOT_SLOT: Slot               = Slot::new(0, 0);
-    pub const BRACE_SLOT: Slot              = Slot::new(BRACE_GROUP, 0);
-    pub const SEMICOLON_LEFT_SLOT: Slot     = Slot::new(SEMICOLON_LEFT_GROUP, 0);
-    pub const SEMICOLON_RIGHT_SLOT: Slot    = Slot::new(SEMICOLON_RIGHT_GROUP, 0);
-    pub const IF_SLOT: Slot                 = Slot::new(IF_GROUP, 0);
-    pub const THEN_SLOT: Slot               = Slot::new(THEN_GROUP, 0);
-    pub const ELSE_SLOT: Slot               = Slot::new(ELSE_GROUP, 0);
-    pub const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_GROUP, FUNC_RIGHT_GROUP | ELSE_GROUP);
-    pub const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_GROUP, FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
-    pub const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_GROUP, 0);
-    pub const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_GROUP, 0);
-    pub const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_GROUP, FUNC_LEFT_GROUP);
-    pub const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_GROUP, 0);
-    pub const SUM_SLOT: Slot                = Slot::new(SUM_GROUP, 0);
-    pub const PROD_SLOT: Slot               = Slot::new(PROD_GROUP, 0);
-    pub const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP | FUNC_TYPE_LEFT_GROUP);
-    pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_GROUP, ELSE_GROUP);
-    pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_GROUP, 0);
+    pub const ROOT_SLOT: Slot               = Slot::new(TEMPLATE_PRECEDENCE,            0,                      0);
+    pub const BRACE_SLOT: Slot              = Slot::new(BRACE_PRECEDENCE,               BRACE_GROUP,            0);
+    pub const SEMICOLON_LEFT_SLOT: Slot     = Slot::new(SEMICOLON_LEFT_PRECEDENCE,      SEMICOLON_LEFT_GROUP,   0);
+    pub const SEMICOLON_RIGHT_SLOT: Slot    = Slot::new(SEMICOLON_RIGHT_PRECEDENCE,     SEMICOLON_RIGHT_GROUP,  0);
+    pub const IF_SLOT: Slot                 = Slot::new(IF_PRECEDENCE,                  IF_GROUP,               0);
+    pub const THEN_SLOT: Slot               = Slot::new(THEN_PRECEDENCE,                THEN_GROUP,             0);
+    pub const ELSE_SLOT: Slot               = Slot::new(ELSE_PRECEDENCE,                ELSE_GROUP,             0);
+    pub const COLON_LEFT_SLOT: Slot         = Slot::new(COLON_LEFT_PRECEDENCE,          COLON_LEFT_GROUP,       FUNC_RIGHT_GROUP | ELSE_GROUP);
+    pub const COLON_RIGHT_SLOT: Slot        = Slot::new(COLON_RIGHT_PRECEDENCE,         COLON_RIGHT_GROUP,      FUNC_LEFT_GROUP | SUM_GROUP | PROD_GROUP);
+    pub const FUNC_RIGHT_SLOT: Slot         = Slot::new(FUNC_RIGHT_PRECEDENCE,          FUNC_RIGHT_GROUP,       0);
+    pub const FUNC_LEFT_SLOT: Slot          = Slot::new(FUNC_LEFT_PRECEDENCE,           FUNC_LEFT_GROUP,        0);
+    pub const FUNC_TYPE_RIGHT_SLOT: Slot    = Slot::new(FUNC_TYPE_RIGHT_PRECEDENCE,     FUNC_TYPE_RIGHT_GROUP,  FUNC_LEFT_GROUP);
+    pub const FUNC_TYPE_LEFT_SLOT: Slot     = Slot::new(FUNC_TYPE_LEFT_PRECEDENCE,      FUNC_TYPE_LEFT_GROUP,   0);
+    pub const SUM_SLOT: Slot                = Slot::new(SUM_PRECEDENCE,                 SUM_GROUP,              0);
+    pub const PROD_SLOT: Slot               = Slot::new(PROD_PRECEDENCE,                PROD_GROUP,             0);
+    pub const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_PRECEDENCE,    APPOSITION_RIGHT_GROUP, FUNC_LEFT_GROUP | FUNC_TYPE_LEFT_GROUP);
+    pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_PRECEDENCE,     APPOSITION_LEFT_GROUP,  ELSE_GROUP);
+    pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_PRECEDENCE,             NO_SLOT_GROUP,          0);
 
-    const fn new(precedence: u32, conflicts: u32) -> Self {
-        Slot { precedence, conflicts }
+    const fn new(precedence: u32, conflict_groups: u32, conflict_masks: u32) -> Self {
+        Slot { precedence, conflict_groups, conflict_masks }
     }
 
-    fn takes_precedence_over(&self, other: &Slot) -> Result<bool, ParseError> {
-        if (self.precedence & other.conflicts) | (other.precedence & self.conflicts) != 0 {
+    fn conflicts_with(&self, other: &Slot) -> Result<(), ParseError> {
+        if (self.conflict_groups & other.conflict_masks) | (other.conflict_groups & self.conflict_masks) != 0 {
             Err(ParseError::OperatorConflict)
         }
         else {
-            Ok(self.precedence >= other.precedence)
+            Ok(())
         }
+    }
+
+    fn takes_precedence_over(&self, other: &Slot) -> bool {
+        self.precedence >= other.precedence
     }
 }
 
@@ -62,6 +86,12 @@ impl PartialEq for Slot {
     fn eq(&self, other: &Self) -> bool {
         self.precedence == other.precedence
     }
+}
+
+pub enum TemplateOutput {
+    Item(Box<CST>),
+    Op(Op),
+    Miss(Op, Option<Box<CST>>, Op),
 }
 
 #[derive(Clone, PartialEq)]
@@ -128,10 +158,6 @@ impl Op {
         }
     }
 
-    fn takes_precedence_over(&self, other: &Op) -> Result<bool, ParseError> {
-        self.right_slot().takes_precedence_over(&other.left_slot())
-    }
-
     fn update_left(&mut self, l: Option<Box<CST>>) {
         if l.is_some() {
             debug_assert!(self.left.is_none());
@@ -143,6 +169,19 @@ impl Op {
         if r.is_some() {
             debug_assert!(self.right.is_none());
             self.right = r;
+        }
+    }
+
+    fn template(mut self, item: Option<Box<CST>>, mut other: Op) -> Result<TemplateOutput, ParseError> {
+        match (self.kind, other.kind) {
+            (OpKind::BraceStart, OpKind::BraceEnd) | 
+            (OpKind::BracketStart, OpKind::BracketEnd) | 
+            (OpKind::ParenthesisStart, OpKind::ParenthesisEnd) => {
+                other.update_left(item);
+                self.right = other.into();
+                Ok(TemplateOutput::Item(self.into()))
+            },
+            _ => Ok(TemplateOutput::Miss(self, item, other))
         }
     }
 }
@@ -253,37 +292,40 @@ pub fn parse<L: Iterator<Item = Result<CST, LexingError>>>(lex: &mut L) -> Resul
 fn parse_inner<L>(lex: &mut L, mut prev_op: Op) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> 
 where L: Iterator<Item = Result<CST, LexingError>>
 {
-    let (mut this_item, mut maybe_this_op) = next(lex, None)?;
+    let (mut item, mut maybe_this_op) = next(lex, None)?;
+
+    let prev_slot = prev_op.right_slot();
 
     loop {
         let Some(mut this_op) = maybe_this_op else {
-            prev_op.update_right(this_item);
+            prev_op.update_right(item);
             return Ok((prev_op.into(), None));
         };
 
-        if prev_op.takes_precedence_over(&this_op)? {
-            break return_inner(prev_op, this_item, this_op)
+        let this_slot = this_op.left_slot();
+
+        prev_slot.conflicts_with(&this_slot)?;
+
+        (prev_op, item, this_op) = match prev_op.template(item, this_op)? {
+            TemplateOutput::Item(item) => {
+                return next(lex, Some(item));
+            },
+            TemplateOutput::Op(new_op) => {
+                return parse_inner(lex, new_op);
+            }
+            TemplateOutput::Miss(prev_op, item, this_op) => (prev_op, item, this_op),
+        };
+
+        if prev_slot.takes_precedence_over(&this_slot) {
+            prev_op.update_right(item);
+            return Ok((prev_op.into(), Some(this_op)));
         }
 
-        this_op.update_left(this_item);
+        this_op.update_left(item);
     
-        (this_item, maybe_this_op) = parse_inner(lex, this_op)?;
+        (item, maybe_this_op) = parse_inner(lex, this_op)?;
     }
 
-}
-
-fn return_inner(mut last_op: Op, item: Option<Box<CST>>, mut this_op: Op) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> {
-    last_op.update_right(item);
-    if last_op.kind == OpKind::BraceStart && this_op.kind == OpKind::BraceEnd
-    || last_op.kind == OpKind::BracketStart && this_op.kind == OpKind::BracketEnd
-    || last_op.kind == OpKind::ParenthesisStart && this_op.kind == OpKind::ParenthesisEnd {
-        
-        this_op.left = last_op.into();
-        Ok((None, Some(this_op)))
-    }
-    else {
-        Ok((last_op.into(), Some(this_op)))
-    }
 }
 
 fn next<L>(lex: &mut L, item: Option<Box<CST>>) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> 
@@ -346,15 +388,15 @@ mod tests {
         }
     
         pub fn bracket(item: impl Into<CST>) -> Op {
-            op(BracketEnd, op(BracketStart, None, item.into()), None)
+            op(BracketStart, None, op(BracketEnd, item.into(), None))
         }
     
         pub fn brace(item: impl Into<CST>) -> Op {
-            op(BraceEnd, op(BraceStart, None, item.into()), None)
+            op(BraceStart, None, op(BraceEnd, item.into(), None))
         }
     
         pub fn parenthesis(item: impl Into<CST>) -> Op {
-            op(ParenthesisEnd, op(ParenthesisStart, None, item.into()), None)
+            op(ParenthesisStart, None, op(ParenthesisEnd, item.into(), None))
         }
     
         pub fn if_then_else(condition: impl Into<CST>, case_1: impl Into<CST>, case_2: impl Into<CST>) -> Op {
@@ -526,6 +568,14 @@ mod tests {
                 ))
             )
         }
+
+        #[test]
+        fn parens_nested() {
+            assert_eq!(
+                parse_str("[(c + d)]"),
+                root(bracket(parenthesis(op(Add, id("c"), id("d")))))
+            )
+        }
     }
 
     mod if_then_conditionals {
@@ -695,8 +745,8 @@ mod tests {
 
         // FIXME: should this be a conflict?
         #[test]
-        fn colon_left_assoc() {
-            assert_left_assoc("a: A: Type", Colon, id("a"), id("A"), id("Type"))
+        fn colon_right_assoc() {
+            assert_right_assoc("a: A: Type", Colon, id("a"), id("A"), id("Type"))
         }
 
         #[test]
