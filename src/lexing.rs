@@ -65,11 +65,11 @@ fn float_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingErro
 
 fn op_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
     let kind = match lex.slice() {
-        "{" => OpKind::BraceStart,
+        "{" => OpKind::Brace,
         "}" => OpKind::BraceEnd,
-        "[" => OpKind::BracketStart,
+        "[" => OpKind::Bracket,
         "]" => OpKind::BracketEnd,
-        "(" => OpKind::ParenthesisStart,
+        "(" => OpKind::Parenthesis,
         ")" => OpKind::ParenthesisEnd,
         "+" => OpKind::Add,
         "*" => OpKind::Mul,
@@ -104,11 +104,11 @@ pub enum LexingError {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum OpKind {
-    BraceStart,
+    Brace,
     BraceEnd,
-    BracketStart,
+    Bracket,
     BracketEnd,
-    ParenthesisStart,
+    Parenthesis,
     ParenthesisEnd,
     Add,
     Sub,
@@ -131,7 +131,7 @@ impl OpKind {
     /// INVARIANT:  must agree with Op::left_slot
     pub fn has_left_slot(&self) -> bool {
         match self {
-            OpKind::BraceStart | OpKind::BracketStart | OpKind::ParenthesisStart | OpKind::If => false,
+            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis | OpKind::If => false,
             OpKind::BraceEnd   | OpKind::BracketEnd   | OpKind::ParenthesisEnd |
             OpKind::Add | OpKind::Sub |
             OpKind::Mul | OpKind::Div | OpKind::Mod  |
@@ -150,7 +150,7 @@ impl OpKind {
     pub fn has_right_slot(&self) -> bool {
         match self {
             OpKind::BraceEnd   | OpKind::BracketEnd   | OpKind::ParenthesisEnd => false,
-            OpKind::BraceStart | OpKind::BracketStart | OpKind::ParenthesisStart |
+            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis |
             OpKind::Add | OpKind::Sub |
             OpKind::Mul | OpKind::Div | OpKind::Mod  |
             OpKind::Apposition |
@@ -172,7 +172,7 @@ pub fn lex<'l>(s: &'l str) -> impl Iterator<Item = Result<CST, LexingError>> + '
             Ok(Token::Token((info, cst))) => {
                 let TokenInfo { apposition, syntax: _ } = info;
                 if apposition {
-                    vec![Ok(Op::new(OpKind::Apposition).into()), Ok(cst)].into_iter()
+                    vec![Ok(CST::Op(Op::new(OpKind::Apposition))), Ok(cst)].into_iter()
                     
                 }
                 else {
@@ -192,13 +192,13 @@ mod tests {
     #[test]
     fn test_apposition() {
         let mut iter = lex("(f x) (g 5 3) + 2 + (h 1)");
-        assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(ParenthesisStart));
+        assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Parenthesis));
         assert_eq!(iter.next().unwrap().unwrap(), CST::id_from("f"));
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Apposition));
         assert_eq!(iter.next().unwrap().unwrap(), CST::id_from("x"));
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(ParenthesisEnd));
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Apposition));
-        assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(ParenthesisStart));
+        assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Parenthesis));
         assert_eq!(iter.next().unwrap().unwrap(), CST::id_from("g"));
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Apposition));
         assert_eq!(iter.next().unwrap().unwrap(), CST::nat_from(5));
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Add));
         assert_eq!(iter.next().unwrap().unwrap(), CST::nat_from(2));
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Add));
-        assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(ParenthesisStart));
+        assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Parenthesis));
         assert_eq!(iter.next().unwrap().unwrap(), CST::id_from("h"));
         assert_eq!(iter.next().unwrap().unwrap(), CST::op_from(Apposition));
         assert_eq!(iter.next().unwrap().unwrap(), CST::nat_from(1));

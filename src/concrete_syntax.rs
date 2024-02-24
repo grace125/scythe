@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::lexing::{OpKind, LexingError};
 pub use OpKind::*;
 
@@ -74,6 +76,11 @@ impl Slot {
     fn takes_precedence_over(&self, other: &Slot) -> bool {
         self.precedence >= other.precedence
     }
+
+    const fn with_template_precedence(mut self) -> Slot {
+        self.precedence = TEMPLATE_PRECEDENCE;
+        return self;
+    }
 }
 
 impl PartialEq for Slot {
@@ -83,33 +90,33 @@ impl PartialEq for Slot {
 }
 
 pub enum TemplateOutput {
-    Item(Box<CST>),
+    Item(CST),
     Op(Op),
-    Miss(Op, Option<Box<CST>>, Op),
+    Miss(Op, Option<CST>, Op),
 }
 
 #[derive(Clone, PartialEq)]
 pub struct Op {
     kind: OpKind,
-    left: Option<Box<CST>>,
-    right: Option<Box<CST>>
+    has_left: bool,
+    children: VecDeque<CST>
 }
 
 impl Op {
     pub fn new(kind: OpKind) -> Op {
-        Op { kind, left: None, right: None }
+        Op { kind, has_left: false, children: VecDeque::new() }
     }
 
     pub fn left_slot(&self) -> Slot {
-        if self.left.is_some() { return Slot::NO_SLOT; }
+        if self.has_left { return Slot::NO_SLOT; }
         match self.kind {
-            OpKind::BraceStart | 
-            OpKind::BracketStart | 
-            OpKind::ParenthesisStart |
+            OpKind::Brace | 
+            OpKind::Bracket | 
+            OpKind::Parenthesis |
             OpKind::If                  => Slot::NO_SLOT,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
-            OpKind::ParenthesisEnd      => Slot::BRACE_SLOT,
+            OpKind::ParenthesisEnd      => Slot::BRACE_SLOT.with_template_precedence(),
             OpKind::Add | 
             OpKind::Sub                 => Slot::SUM_SLOT,
             OpKind::Mul | 
@@ -117,8 +124,8 @@ impl Op {
             OpKind::Mod                 => Slot::PROD_SLOT,
             OpKind::Apposition          => Slot::APPOSITION_LEFT_SLOT,
             OpKind::Root                => Slot::ROOT_SLOT,
-            OpKind::Then                => Slot::THEN_SLOT,
-            OpKind::Else                => Slot::ELSE_SLOT,
+            OpKind::Then                => Slot::THEN_SLOT.with_template_precedence(),
+            OpKind::Else                => Slot::ELSE_SLOT.with_template_precedence(),
             OpKind::Semicolon           => Slot::SEMICOLON_LEFT_SLOT,
             OpKind::Func                => Slot::FUNC_LEFT_SLOT,
             OpKind::FuncType            => Slot::FUNC_TYPE_LEFT_SLOT,
@@ -127,24 +134,27 @@ impl Op {
     }
 
     pub fn right_slot(&self) -> Slot {
-        if self.right.is_some() { return Slot::NO_SLOT; }
         match self.kind {
-            OpKind::BraceStart | 
-            OpKind::BracketStart | 
-            OpKind::ParenthesisStart    => Slot::BRACE_SLOT,
+            OpKind::Brace | 
+            OpKind::Bracket | 
+            OpKind::Parenthesis    => Slot::BRACE_SLOT,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
-            OpKind::ParenthesisEnd      => Slot::NO_SLOT,
+            OpKind::ParenthesisEnd      => unreachable!(),
             OpKind::Add | 
-            OpKind::Sub                 => if self.left.is_some() { Slot::SUM_SLOT } else { Slot::PROD_SLOT },
+            OpKind::Sub                 => if !self.has_left && self.children.len() == 0 { Slot::PROD_SLOT } else { Slot::SUM_SLOT },
             OpKind::Mul | 
             OpKind::Div | 
             OpKind::Mod                 => Slot::PROD_SLOT,
             OpKind::Apposition          => Slot::APPOSITION_RIGHT_SLOT,
             OpKind::Root                => Slot::ROOT_SLOT,
-            OpKind::If                  => Slot::IF_SLOT,
-            OpKind::Then                => Slot::THEN_SLOT,
-            OpKind::Else                => Slot::ELSE_SLOT,
+            OpKind::If                  => match self.children.len() {
+                0 => Slot::IF_SLOT,
+                1 => Slot::THEN_SLOT,
+                _ => Slot::ELSE_SLOT
+            },
+            OpKind::Then                => unreachable!(),
+            OpKind::Else                => unreachable!(),
             OpKind::Semicolon           => Slot::SEMICOLON_RIGHT_SLOT,
             OpKind::Func                => Slot::FUNC_RIGHT_SLOT,
             OpKind::FuncType            => Slot::FUNC_TYPE_RIGHT_SLOT,
@@ -152,29 +162,69 @@ impl Op {
         }
     }
 
-    fn update_left(&mut self, l: Option<Box<CST>>) {
-        if l.is_some() {
-            debug_assert!(self.left.is_none());
-            self.left = l;
+    fn push_left(&mut self, l: CST) {
+        debug_assert!(!self.has_left);
+        self.has_left = true;
+        self.children.push_front(l);
+    }
+
+    fn push_right(&mut self, r: CST) {
+        self.children.push_back(r);
+    }
+
+    fn push_left_option(&mut self, l: Option<CST>) {
+        if let Some(l) = l {
+            self.push_left(l);
         }
     }
 
-    fn update_right(&mut self, r: Option<Box<CST>>) {
-        if r.is_some() {
-            debug_assert!(self.right.is_none());
-            self.right = r;
+    fn push_right_option(&mut self, r: Option<CST>) {
+        if let Some(r) = r {
+            self.push_right(r);
         }
     }
 
-    fn template(mut self, item: Option<Box<CST>>, mut other: Op) -> Result<TemplateOutput, ParseError> {
+    fn template_exclusive_op(&self) -> Result<(), ParseError> {
+        match self.kind {
+            OpKind::BraceEnd | OpKind::BracketEnd | OpKind::ParenthesisEnd | OpKind::Then | OpKind::Else => Err(ParseError::UnusedTemplate(self.kind)),
+            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis | 
+            OpKind::Add | OpKind::Sub | OpKind::Mul | OpKind::Div | OpKind::Mod | 
+            OpKind::If | OpKind::Semicolon | OpKind::Func | OpKind::FuncType | 
+            OpKind::Colon | OpKind::Apposition | OpKind::Root                                           => Ok(())   
+        }
+    }
+
+    // TODO: name this better
+    fn template(mut self, item: Option<CST>, other: Op) -> Result<TemplateOutput, ParseError> {
         match (self.kind, other.kind) {
-            (OpKind::BraceStart, OpKind::BraceEnd) | 
-            (OpKind::BracketStart, OpKind::BracketEnd) | 
-            (OpKind::ParenthesisStart, OpKind::ParenthesisEnd) => {
-                other.update_left(item);
-                self.right = other.into();
-                Ok(TemplateOutput::Item(self.into()))
+            (OpKind::Brace, OpKind::BraceEnd) | 
+            (OpKind::Bracket, OpKind::BracketEnd) | 
+            (OpKind::Parenthesis, OpKind::ParenthesisEnd) => {
+                self.push_right_option(item);
+                Ok(TemplateOutput::Item(self.try_into()?))
             },
+            (OpKind::If, OpKind::Then) => {
+                if self.children.len() == 0 {
+                    let Some(item) = item else {
+                        return Err(ParseError::InvalidEmptySlot("Expected condition between `if` and `else`, got nothing".to_owned()))
+                    };
+                    self.push_right(item);
+                    Ok(TemplateOutput::Op(self))
+                }
+                else {
+                    Err(ParseError::InvalidTemplate("`if` statement has more than one `then`".to_owned()))
+                }
+            },
+            (OpKind::If, OpKind::Else) => match self.children.len() {
+                0 => Err(ParseError::InvalidTemplate("Expected `then`, got `else`".to_owned())),
+                1 => if let Some(item) = item {
+                    self.push_right(item);
+                    Ok(TemplateOutput::Op(self))
+                } else {
+                    Err(ParseError::InvalidEmptySlot("Expected branch between `then` and `else`, got nothing".to_owned()))
+                },
+                _ => Err(ParseError::InvalidTemplate("`if` statement has more than one `else`".to_owned()))
+            }
             _ => Ok(TemplateOutput::Miss(self, item, other))
         }
     }
@@ -182,38 +232,74 @@ impl Op {
 
 impl std::fmt::Debug for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Op { kind, left, right } = self;
+        let Op { kind, has_left, children } = self;
         
         f.write_fmt(format_args!("{:?}(", kind))?;
-        if let Some(left) = left {
-            (**left).fmt(f)?;
-        }
-        if let Some(right) = right {
-            f.write_str(", ")?;
-            (**right).fmt(f)?;
-            f.write_str(")")
-        }
-        else {
+        if children.is_empty() {
             f.write_str(",)")
         }
+        else {
+            if !has_left {
+                f.write_str(", ")?;
+            }
+            let mut iter = children.iter();
+            let mut r = iter.next().unwrap();
+            loop {
+                (*r).fmt(f)?;
+                if let Some(n) = iter.next() {
+                    r = n;
+                    f.write_str(", ")?;
+                }
+                else {
+                    break;
+                }
+            }
+            f.write_str(")")
+        }
     }
 }
 
-impl Into<CST> for Op {
-    fn into(self) -> CST {
-        CST::Op(self)
-    }
-}
+impl TryInto<CST> for Op {
+    type Error = ParseError;
 
-impl Into<Box<CST>> for Op {
-    fn into(self) -> Box<CST> {
-        Box::new(CST::Op(self))
-    }
-}
-
-impl Into<Option<Box<CST>>> for Op {
-    fn into(self) -> Option<Box<CST>> {
-        Some(Box::new(CST::Op(self)))
+    fn try_into(self) -> Result<CST, Self::Error> {
+        match (self.kind, self.children.len()) {
+            (OpKind::Then, _) | 
+            (OpKind::Else, _) | 
+            (OpKind::BraceEnd, _) | 
+            (OpKind::BracketEnd, _) | 
+            (OpKind::ParenthesisEnd, _)             => unreachable!(),
+            (OpKind::If, 2 | 3) | 
+            (OpKind::Add, 1 | 2) | 
+            (OpKind::Sub, 1 | 2) |
+            (OpKind::Mul, 2) | 
+            (OpKind::Div, 2) | 
+            (OpKind::Mod, 2) |
+            (OpKind::Apposition, 2) | 
+            (OpKind::Colon, 2) |
+            (OpKind::Semicolon, 1 | 2) |
+            (OpKind::Func, 2) |
+            (OpKind::FuncType, 2) |
+            (OpKind::Root, 0) |
+            (OpKind::Brace, 1) | 
+            (OpKind::Bracket, 1) | 
+            (OpKind::Parenthesis, 1)                => Ok(CST::Op(self)),
+            (OpKind::If, _) |
+            (OpKind::Add, _) |
+            (OpKind::Sub, _) |
+            (OpKind::Mul, _) | 
+            (OpKind::Div, _) | 
+            (OpKind::Mod, _) |
+            (OpKind::Apposition, _) | 
+            (OpKind::Colon, _) |
+            (OpKind::Semicolon, _) |
+            (OpKind::Func, _) |
+            (OpKind::FuncType, _) |
+            (OpKind::Root, _) |
+            (OpKind::Brace, _) | 
+            (OpKind::Bracket, _) | 
+            (OpKind::Parenthesis, _)                => Err(ParseError::IncompleteOperator(self)),
+        }
     }
 }
 
@@ -262,38 +348,40 @@ impl Into<Option<Box<CST>>> for CST {
     }
 }
 
-pub fn parse<L: Iterator<Item = Result<CST, LexingError>>>(lex: &mut L) -> Result<Option<Box<CST>>, ParseError> {
+pub fn parse<L: Iterator<Item = Result<CST, LexingError>>>(lex: &mut L) -> Result<Option<CST>, ParseError> {
     let (first_item, first_op) = next(lex, None)?;
 
     let Some(mut first_op) = first_op else {
         return Ok(first_item);
     };
 
-    first_op.left = first_item;
+    first_op.push_left_option(first_item);
 
     loop {
         let (new_item, new_op) = parse_inner(lex, first_op)?;
         match new_op {
             None => break Ok(new_item),
             Some(mut new_op) => {
-                new_op.update_left(new_item);
+                new_op.push_left_option(new_item);
                 first_op = new_op;
             }
         }
     }
 }
 
-fn parse_inner<L>(lex: &mut L, mut prev_op: Op) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> 
+fn parse_inner<L>(lex: &mut L, mut prev_op: Op) -> Result<(Option<CST>, Option<Op>), ParseError> 
 where L: Iterator<Item = Result<CST, LexingError>>
 {
+    prev_op.template_exclusive_op()?;
+
     let (mut item, mut maybe_this_op) = next(lex, None)?;
 
     let prev_slot = prev_op.right_slot();
 
     loop {
         let Some(mut this_op) = maybe_this_op else {
-            prev_op.update_right(item);
-            return Ok((prev_op.into(), None));
+            prev_op.push_right_option(item);
+            return Ok((Some(prev_op.try_into()?), None));
         };
 
         let this_slot = this_op.left_slot();
@@ -311,18 +399,18 @@ where L: Iterator<Item = Result<CST, LexingError>>
         };
 
         if prev_slot.takes_precedence_over(&this_slot) {
-            prev_op.update_right(item);
-            return Ok((prev_op.into(), Some(this_op)));
+            prev_op.push_right_option(item);
+            return Ok((Some(prev_op.try_into()?), Some(this_op)));
         }
 
-        this_op.update_left(item);
+        this_op.push_left_option(item);
     
         (item, maybe_this_op) = parse_inner(lex, this_op)?;
     }
 
 }
 
-fn next<L>(lex: &mut L, item: Option<Box<CST>>) -> Result<(Option<Box<CST>>, Option<Op>), ParseError> 
+fn next<L>(lex: &mut L, item: Option<CST>) -> Result<(Option<CST>, Option<Op>), ParseError> 
 where L: Iterator<Item = Result<CST, LexingError>>
 {
     match lex.next() {
@@ -344,6 +432,9 @@ pub enum ParseError {
     ItemExpected,
     InvalidArity,
     InvalidEmptySlot(String),
+    InvalidTemplate(String),
+    UnusedTemplate(OpKind),
+    IncompleteOperator(Op)
 }
 
 impl From<LexingError> for ParseError {
@@ -361,16 +452,12 @@ mod tests {
     mod helpers {
         use super::*;
 
-        pub fn parse_str(s: &str) -> Result<Option<Box<CST>>, ParseError> {
+        pub fn parse_str(s: &str) -> Result<Option<CST>, ParseError> {
             parse(&mut lex(s))
         }
     
-        pub fn root(op: Op) -> Result<Option<Box<CST>>, ParseError> {
-            Ok(op.into())
-        }
-
-        pub fn op(kind: OpKind, left: impl Into<Option<Box<CST>>>, right: impl Into<Option<Box<CST>>>) -> Op {
-            Op { kind, left: left.into(), right: right.into() }
+        pub fn root(cst: CST) -> Result<Option<CST>, ParseError> {
+            Ok(Some(cst))
         }
     
         pub fn id(s: &str) -> CST {
@@ -381,32 +468,140 @@ mod tests {
             CST::Nat(s)
         }
     
-        pub fn bracket(item: impl Into<CST>) -> Op {
-            op(BracketStart, None, op(BracketEnd, item.into(), None))
+        pub fn bracket(item: CST) -> CST {
+            Op { 
+                kind: Bracket, 
+                has_left: false,
+                children: VecDeque::from(vec![item])
+            }.try_into().unwrap()
         }
     
-        pub fn brace(item: impl Into<CST>) -> Op {
-            op(BraceStart, None, op(BraceEnd, item.into(), None))
+        pub fn brace(item: CST) -> CST {
+            Op { 
+                kind: Brace, 
+                has_left: false,
+                children: VecDeque::from(vec![item])
+            }.try_into().unwrap()
         }
     
-        pub fn parenthesis(item: impl Into<CST>) -> Op {
-            op(ParenthesisStart, None, op(ParenthesisEnd, item.into(), None))
+        pub fn parenthesis(item: CST) -> CST {
+            Op { 
+                kind: Parenthesis, 
+                has_left: false,
+                children: VecDeque::from(vec![item])
+            }.try_into().unwrap()
         }
     
-        pub fn if_then_else(condition: impl Into<CST>, case_1: impl Into<CST>, case_2: impl Into<CST>) -> Op {
-            op(If, None, op(Then, condition.into(), op(Else, case_1.into(), case_2.into())))
+        pub fn if_then_else(condition: CST, case_1: CST, case_2: CST) -> CST {
+            Op { 
+                kind: If, 
+                has_left: false,
+                children: VecDeque::from(vec![condition, case_1, case_2])
+            }.try_into().unwrap()
         }
     
-        pub fn if_then(condition: impl Into<CST>, case: impl Into<CST>) -> Op {
-            op(If, None, op(Then, condition.into(), case.into()))
+        pub fn if_then(condition: CST, case: CST) -> CST {
+            Op { 
+                kind: If, 
+                has_left: false,
+                children: VecDeque::from(vec![condition, case])
+            }.try_into().unwrap()
         }
-    
-        pub fn assert_left_assoc(s: &str, kind: OpKind, id1: CST, id2: CST, id3: CST) {
-            assert_eq!(parse_str(s), root(op(kind, op(kind, id1, id2), id3)))
+
+        pub fn apposition(left: CST, right: CST) -> CST {
+            Op {
+                kind: Apposition,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
         }
-        
-        pub fn assert_right_assoc(s: &str, kind: OpKind, id1: CST, id2: CST, id3: CST) {
-            assert_eq!(parse_str(s), root(op(kind, id1, op(kind, id2, id3))))
+
+        pub fn add(left: CST, right: CST) -> CST {
+            Op {
+                kind: Add,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn sub(left: CST, right: CST) -> CST {
+            Op {
+                kind: Sub,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn unary_add(item: CST) -> CST {
+            Op {
+                kind: Add,
+                has_left: false,
+                children: VecDeque::from(vec![item])
+            }.try_into().unwrap()
+        }
+
+        pub fn unary_sub(item: CST) -> CST {
+            Op {
+                kind: Sub,
+                has_left: false,
+                children: VecDeque::from(vec![item])
+            }.try_into().unwrap()
+        }
+
+        pub fn mul(left: CST, right: CST) -> CST {
+            Op {
+                kind: Mul,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn div(left: CST, right: CST) -> CST {
+            Op {
+                kind: Div,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn modulo(left: CST, right: CST) -> CST {
+            Op {
+                kind: Mod,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn func(left: CST, right: CST) -> CST {
+            Op {
+                kind: Func,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn func_type(left: CST, right: CST) -> CST {
+            Op {
+                kind: FuncType,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn colon(left: CST, right: CST) -> CST {
+            Op {
+                kind: Colon,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
+        }
+
+        pub fn semicolon(left: CST, right: CST) -> CST {
+            Op {
+                kind: Semicolon,
+                has_left: true,
+                children: VecDeque::from(vec![left, right])
+            }.try_into().unwrap()
         }
     }
 
@@ -415,69 +610,87 @@ mod tests {
 
         #[test]
         fn apposition_right_assoc() {
-            assert_right_assoc("x y z", Apposition, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x y z"),
+                root(apposition(id("x"), apposition(id("y"), id("z"))))
+            );
         }
     }
-
+    
     mod arithmetic {
         use super::*;
 
         #[test]
         fn addition_left_assoc() {
-            assert_left_assoc("x + y + z", Add, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x + y + z"),
+                root(add(add(id("x"), id("y")), id("z")))
+            );
         }
     
         #[test]
         fn subtraction_left_assoc() {
-            assert_left_assoc("x - y - z", Sub, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x - y - z"),
+                root(sub(sub(id("x"), id("y")), id("z")))
+            );
         }
     
         #[test]
         fn multiplication_left_assoc() {
-            assert_left_assoc("x * y * z", Mul, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x * y * z"),
+                root(mul(mul(id("x"), id("y")), id("z")))
+            );
         }
     
         #[test]
         fn division_left_assoc() {
-            assert_left_assoc("x / y / z", Div, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x / y / z"),
+                root(div(div(id("x"), id("y")), id("z")))
+            );
         }
     
         #[test]
         fn modulo_left_assoc() {
-            assert_left_assoc("x % y % z", Mod, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x % y % z"),
+                root(modulo(modulo(id("x"), id("y")), id("z")))
+            );
         }
     
         #[test]
         fn arithmetic() {
             assert_eq!(
                 parse_str("x * y + z"), 
-                root(op(Add, op(Mul, id("x"), id("y")), id("z")))
-            )
+                root(add(mul(id("x"), id("y")), id("z")))
+            );
         }
     
         #[test]
         fn arithmetic_2() {
             assert_eq!(
                 parse_str("2 % x - yy / 44"), 
-                root(op(Sub, op(Mod, nat(2), id("x")), op(Div, id("yy"), nat(44))))
+                root(sub(modulo(nat(2), id("x")), div(id("yy"), nat(44))))
             )
         }
     
         #[test]
         fn unary_subtraction() {
-            assert_eq!(parse_str("-a * b"), root(op(Mul, op(Sub, None, id("a")), id("b"))))
+            assert_eq!(parse_str("-a * b"), root(mul(unary_sub(id("a")), id("b"))))
         }
     
         #[test]
         fn apposition_addition_conflict() {
-            assert_eq!(parse_str("f x + y"), root(op(Add, op(Apposition, id("f"), id("x")), id("y"))));
+            assert_eq!(parse_str("f x + y"), root(add(apposition(id("f"), id("x")), id("y"))));
         }
     
         #[test]
         fn addition_apposition() {
             assert_eq!(
                 parse_str("x + f y"), 
-                root(op(Add, id("x"), op(Apposition, id("f"), id("y"))))
+                root(add(id("x"), apposition(id("f"), id("y"))))
             )
         }
     
@@ -505,42 +718,38 @@ mod tests {
         fn parens_arithmetic() {
             assert_eq!(
                 parse_str("(x) + 5"),
-                root(op(Add, parenthesis(id("x")), nat(5)))
+                root(add(parenthesis(id("x")), nat(5)))
             )
         }
 
         #[test]
         fn parens_item_arithmetic() {
-            assert_eq!(parse_str("(f) 3 + 5"), root(op(Add, op(Apposition, parenthesis(id("f")), nat(3)), nat(5))))
+            assert_eq!(parse_str("(f) 3 + 5"), root(add(apposition(parenthesis(id("f")), nat(3)), nat(5))))
         }
 
-        // Tests "case 3" in parse
         #[test]
         fn arithmetic_parens() {
-            assert_eq!(parse_str("5 + (x)"), root(op(Add, nat(5), parenthesis(id("x")))))
+            assert_eq!(parse_str("5 + (x)"), root(add(nat(5), parenthesis(id("x")))))
         }
 
-        // Tests "case 4" in parse
         #[test]
         fn arithmetic_item_parens() {
             assert_eq!(
                 parse_str("5 + f(x)"), 
-                root(op(Add, nat(5), op(Apposition, id("f"), parenthesis(id("x")))))
+                root(add(nat(5), apposition(id("f"), parenthesis(id("x")))))
             )
         }
 
-        // Tests "case 5" in parse
         #[test]
         fn parens_parens() {
-            assert_eq!(parse_str("(f) (x)"), root(op(Apposition, parenthesis(id("f")), parenthesis(id("x")))))
+            assert_eq!(parse_str("(f) (x)"), root(apposition(parenthesis(id("f")), parenthesis(id("x")))))
         }
 
-        // Tests "case 6" in parse
         #[test]
         fn parens_item_parens() {
             assert_eq!(
                 parse_str("(f) a (x)"), 
-                root(op(Apposition, parenthesis(id("f")), op(Apposition, id("a"), parenthesis(id("x")))))
+                root(apposition(parenthesis(id("f")), apposition(id("a"), parenthesis(id("x")))))
             )
         }
 
@@ -548,7 +757,7 @@ mod tests {
         fn parens_around_arithmetic() {
             assert_eq!(
                 parse_str("(a + b)"),
-                root(parenthesis(op(Add, id("a"), id("b"))))
+                root(parenthesis(add(id("a"), id("b"))))
             )
         }
 
@@ -556,9 +765,9 @@ mod tests {
         fn parens_around_arithmetic_arithmetic() {
             assert_eq!(
                 parse_str("(a + b) + (c + d)"),
-                root(op(Add, 
-                    parenthesis(op(Add, id("a"), id("b"))), 
-                    parenthesis(op(Add, id("c"), id("d")))
+                root(add(
+                    parenthesis(add(id("a"), id("b"))), 
+                    parenthesis(add(id("c"), id("d")))
                 ))
             )
         }
@@ -567,11 +776,11 @@ mod tests {
         fn parens_nested() {
             assert_eq!(
                 parse_str("[(c + d)]"),
-                root(bracket(parenthesis(op(Add, id("c"), id("d")))))
+                root(bracket(parenthesis(add(id("c"), id("d")))))
             )
         }
     }
-
+    
     mod if_then_conditionals {
         use super::*;
             
@@ -600,9 +809,9 @@ mod tests {
         fn if_then_apposition() {
             assert_eq!(
                 parse_str("a if f x then g y"),
-                root(op(Apposition, id("a"), if_then(
-                    op(Apposition, id("f"), id("x")), 
-                    op(Apposition, id("g"), id("y"))
+                root(apposition(id("a"), if_then(
+                    apposition(id("f"), id("x")), 
+                    apposition(id("g"), id("y"))
                 )))
             )
         }
@@ -611,17 +820,29 @@ mod tests {
         fn if_then_else_arithmetic() {
             assert_eq!(
                 parse_str("if w + x then x % y else y * z"), 
-                root(if_then_else(op(Add, id("w"), id("x")), op(Mod, id("x"), id("y")), op(Mul, id("y"), id("z"))))
+                root(if_then_else(add(id("w"), id("x")), modulo(id("x"), id("y")), mul(id("y"), id("z"))))
+            )
+        }
+
+
+        #[test]
+        fn incomplete_if() {
+            assert_eq!(
+                parse_str("if a"),
+                Err(ParseError::IncompleteOperator(Op { kind: If, has_left: false, children: VecDeque::from(vec![id("a")]) }))
             )
         }
     }
-
+    
     mod func {
         use super::*;
         
         #[test]
         fn func_right_assoc() {
-            assert_right_assoc("x => y => z", Func, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x => y => z"),
+                root(func(id("x"), func(id("y"), id("z"))))
+            );
         }
 
         // TODO: figure out semantics for this case, or make it a conflict
@@ -635,14 +856,14 @@ mod tests {
 
         #[test]
         fn func_apposition() {
-            assert_eq!(parse_str("a => f x"), root(op(Func, id("a"), op(Apposition, id("f"), id("x")))))
+            assert_eq!(parse_str("a => f x"), root(func(id("a"), apposition(id("f"), id("x")))))
         }
 
         #[test]
         fn func_arithmetic() {
             assert_eq!(
                 parse_str("A * B => a + b"),
-                root(op(Func, op(Mul, id("A"), id("B")), op(Add, id("a"), id("b"))))
+                root(func(mul(id("A"), id("B")), add(id("a"), id("b"))))
             )
         }
 
@@ -650,7 +871,7 @@ mod tests {
         fn func_if_then_else() {
             assert_eq!(
                 parse_str("a => if a then 1 else x"),
-                root(op(Func, id("a"), if_then_else(id("a"), nat(1), id("x"))))
+                root(func(id("a"), if_then_else(id("a"), nat(1), id("x"))))
             )
         }
 
@@ -659,20 +880,24 @@ mod tests {
             assert_eq!(
                 parse_str("if a => b then c => d else e => f"),
                 root(if_then_else(
-                    op(Func, id("a"), id("b")), 
-                    op(Func, id("c"), id("d")), 
-                    op(Func, id("e"), id("f"))
+                    func(id("a"), id("b")), 
+                    func(id("c"), id("d")), 
+                    func(id("e"), id("f"))
                 ))
             )
         }
     }
 
+    
     mod func_type {
         use super::*;
 
         #[test]
         fn func_type_right_assoc() {
-            assert_right_assoc("x -> y -> z", FuncType, id("x"), id("y"), id("z"))
+            assert_eq!(
+                parse_str("x -> y -> z"),
+                root(func_type(id("x"), func_type(id("y"), id("z"))))
+            );
         }
 
         // TODO: figure out semantics for this case, or make it a conflict
@@ -686,14 +911,14 @@ mod tests {
 
         #[test]
         fn func_type_apposition() {
-            assert_eq!(parse_str("a -> f x"), root(op(FuncType, id("a"), op(Apposition, id("f"), id("x")))))
+            assert_eq!(parse_str("a -> f x"), root(func_type(id("a"), apposition(id("f"), id("x")))))
         }
 
         #[test]
         fn func_type_arithmetic() {
             assert_eq!(
                 parse_str("A * B -> A + B"),
-                root(op(FuncType, op(Mul, id("A"), id("B")), op(Add, id("A"), id("B"))))
+                root(func_type(mul(id("A"), id("B")), add(id("A"), id("B"))))
             )
         }
 
@@ -701,7 +926,7 @@ mod tests {
         fn func_type_if_then_else() {
             assert_eq!(
                 parse_str("a -> if a then A else B"),
-                root(op(FuncType, id("a"), if_then_else(id("a"), id("A"), id("B"))))
+                root(func_type(id("a"), if_then_else(id("a"), id("A"), id("B"))))
             )
         }
 
@@ -710,9 +935,9 @@ mod tests {
             assert_eq!(
                 parse_str("if A -> B then C -> D else E -> F"),
                 root(if_then_else(
-                    op(FuncType, id("A"), id("B")), 
-                    op(FuncType, id("C"), id("D")), 
-                    op(FuncType, id("E"), id("F"))
+                    func_type(id("A"), id("B")), 
+                    func_type(id("C"), id("D")), 
+                    func_type(id("E"), id("F"))
                 ))
             )
         }
@@ -721,7 +946,7 @@ mod tests {
         fn func_func_type() {
             assert_eq!(
                 parse_str("A => A -> B"),
-                root(op(Func, id("A"), op(FuncType, id("A"), id("B"))))
+                root(func(id("A"), func_type(id("A"), id("B"))))
             )
         }
 
@@ -733,21 +958,26 @@ mod tests {
             )
         }
     }
-
+    
+    
     mod colon {
         use super::*;
+
 
         // FIXME: should this be a conflict?
         #[test]
         fn colon_right_assoc() {
-            assert_right_assoc("a: A: Type", Colon, id("a"), id("A"), id("Type"))
+            assert_eq!(
+                parse_str("a: A: Type"),
+                root(colon(id("a"), colon(id("A"), id("Type"))))
+            );
         }
 
         #[test]
         fn colon_apposition() {
             assert_eq!(
                 parse_str("list: Vec T n"),
-                root(op(Colon, id("list"), op(Apposition, id("Vec"), op(Apposition, id("T"), id("n")))))
+                root(colon(id("list"), apposition(id("Vec"), apposition(id("T"), id("n")))))
             )
         }
 
@@ -756,7 +986,7 @@ mod tests {
         fn apposition_colon() {
             assert_eq!(
                 parse_str("f x: T"),
-                root(op(Colon, op(Apposition, id("f"), id("x")), id("T")))
+                root(colon(apposition(id("f"), id("x")), id("T")))
             )
         }
 
@@ -764,7 +994,7 @@ mod tests {
         fn arithmetic_colon() {
             assert_eq!(
                 parse_str("a / b: A"),
-                root(op(Colon, op(Div, id("a"), id("b")), id("A")))
+                root(colon(div(id("a"), id("b")), id("A")))
             )
         }
 
@@ -781,8 +1011,8 @@ mod tests {
             assert_eq!(
                 parse_str("if a: A then b: B"),
                 root(if_then(
-                    op(Colon, id("a"), id("A")),
-                    op(Colon, id("b"), id("B")),
+                    colon(id("a"), id("A")),
+                    colon(id("b"), id("B")),
                 ))
             )
         }
@@ -823,7 +1053,7 @@ mod tests {
         fn colon_func_type() {
             assert_eq!(
                 parse_str("f: A -> B"),
-                root(op(Colon, id("f"), op(FuncType, id("A"), id("B"))))
+                root(colon(id("f"), func_type(id("A"), id("B"))))
             )
         }
 
@@ -831,7 +1061,7 @@ mod tests {
         fn func_type_colon() {
             assert_eq!(
                 parse_str("A -> B: Type"),
-                root(op(Colon, op(FuncType, id("A"), id("B")), id("Type")))
+                root(colon(func_type(id("A"), id("B")), id("Type")))
             )
         }
     }
@@ -840,15 +1070,18 @@ mod tests {
         use super::*;
 
         #[test]
-        fn semicolon_right_assoc() {
-            assert_right_assoc("a; b ; c", Semicolon, id("a"), id("b"), id("c"))
+        fn func_type_right_assoc() {
+            assert_eq!(
+                parse_str("x; y; z"),
+                root(semicolon(id("x"), semicolon(id("y"), id("z"))))
+            );
         }
 
         #[test]
         fn semicolon_apposition() {
             assert_eq!(
                 parse_str("f x; g y"),
-                root(op(Semicolon, op(Apposition, id("f"), id("x")), op(Apposition, id("g"), id("y"))))
+                root(semicolon(apposition(id("f"), id("x")), apposition(id("g"), id("y"))))
             )
         }
 
@@ -856,7 +1089,7 @@ mod tests {
         fn semicolon_arithmetic() {
             assert_eq!(
                 parse_str("a + b; c * d"),
-                root(op(Semicolon, op(Add, id("a"), id("b")), op(Mul, id("c"), id("d"))))
+                root(semicolon(add(id("a"), id("b")), mul(id("c"), id("d"))))
             )
         }
 
@@ -864,27 +1097,26 @@ mod tests {
         fn semicolon_parens() {
             assert_eq!(
                 parse_str("(a + b; c); {d - e}"),
-                root(op(Semicolon, 
-                    parenthesis(op(Semicolon, op(Add, id("a"), id("b")), id("c"))), 
-                    brace(op(Sub, id("d"), id("e")))
+                root(semicolon(
+                    parenthesis(semicolon(add(id("a"), id("b")), id("c"))), 
+                    brace(sub(id("d"), id("e")))
                 ))
             )
         }
 
-        // TODO: find a way to have a conflict that doesn't ruin if_then_semicolon (?)
-        // #[test]
-        // fn if_semicolon_conflict() {
-        //     assert_eq!(
-        //         parse_str("if a; b then c else d"),
-        //         Err(ParseError::OperatorConflict)
-        //     )
-        // }
+        #[test]
+        fn if_semicolon_conflict() {
+            assert_eq!(
+                parse_str("if a; b then c else d"),
+                Err(ParseError::IncompleteOperator(Op { kind: If, has_left: false, children: VecDeque::from(vec![id("a")])}))
+            )
+        }
 
         #[test]
         fn if_then_semicolon() {
             assert_eq!(
                 parse_str("if a then b; c"),
-                root(op(Semicolon, if_then(id("a"), id("b")), id("c")))
+                root(semicolon(if_then(id("a"), id("b")), id("c")))
             )
         }
 
@@ -892,7 +1124,7 @@ mod tests {
         fn else_semicolon() {
             assert_eq!(
                 parse_str("if a then b else c; d"),
-                root(op(Semicolon, if_then_else(id("a"), id("b"), id("c")), id("d")))
+                root(semicolon(if_then_else(id("a"), id("b"), id("c")), id("d")))
             )
         }
     }
