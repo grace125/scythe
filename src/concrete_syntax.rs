@@ -9,19 +9,20 @@ const SEMICOLON_RIGHT_PRECEDENCE: u32   = 2;
 const SEMICOLON_LEFT_PRECEDENCE: u32    = 3;
 const LET_PRECEDENCE: u32               = 4;
 const ASSIGN_PRECEDENCE: u32            = 5;
-const IF_PRECEDENCE: u32                = 6;
-const THEN_PRECEDENCE: u32              = 7;
-const ELSE_PRECEDENCE: u32              = 8;
-const COLON_RIGHT_PRECEDENCE: u32       = 9;
-const COLON_LEFT_PRECEDENCE: u32        = 10;
-const FUNC_RIGHT_PRECEDENCE: u32        = 11;
-const FUNC_LEFT_PRECEDENCE: u32         = 12;
-const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 13;
-const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 14;
-const SUM_PRECEDENCE: u32               = 15;
-const PROD_PRECEDENCE: u32              = 16;
-const APPOSITION_RIGHT_PRECEDENCE: u32  = 17;
-const APPOSITION_LEFT_PRECEDENCE: u32   = 18;
+const TUPLE_PRECEDENCE: u32             = 6;
+const IF_PRECEDENCE: u32                = 7;
+const THEN_PRECEDENCE: u32              = 8;
+const ELSE_PRECEDENCE: u32              = 9;
+const COLON_RIGHT_PRECEDENCE: u32       = 10;
+const COLON_LEFT_PRECEDENCE: u32        = 11;
+const FUNC_RIGHT_PRECEDENCE: u32        = 12;
+const FUNC_LEFT_PRECEDENCE: u32         = 13;
+const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 14;
+const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 15;
+const SUM_PRECEDENCE: u32               = 16;
+const PROD_PRECEDENCE: u32              = 17;
+const APPOSITION_RIGHT_PRECEDENCE: u32  = 18;
+const APPOSITION_LEFT_PRECEDENCE: u32   = 19;
 const NO_SLOT_PRECEDENCE: u32           = u32::MAX;
 
 const BRACE_GROUP: u32              = 0b______________1;
@@ -37,6 +38,7 @@ const PROD_GROUP: u32               = 0b_____1000000000;
 const APPOSITION_GROUP: u32         = 0b____10000000000;
 const LET_GROUP: u32                = 0b___100000000000;
 const ASSIGN_GROUP: u32             = 0b__1000000000000;
+const TUPLE_GROUP: u32              = 0b_10000000000000;
 
 pub struct Slot {
     precedence: u32,
@@ -64,6 +66,7 @@ impl Slot {
     pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_PRECEDENCE,     APPOSITION_GROUP,       ELSE_GROUP);
     pub const LET_SLOT: Slot                = Slot::new(LET_PRECEDENCE,                 LET_GROUP,              0);
     pub const ASSIGN_SLOT: Slot             = Slot::new(ASSIGN_PRECEDENCE,              ASSIGN_GROUP,           0);
+    pub const TUPLE_SLOT: Slot              = Slot::new(TUPLE_PRECEDENCE,               TUPLE_GROUP,            SEMICOLON_GROUP | ASSIGN_GROUP | LET_GROUP | IF_GROUP | THEN_GROUP);
     pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_PRECEDENCE,             0,                      0);
 
     const fn new(precedence: u32, conflict_groups: u32, conflict_masks: u32) -> Self {
@@ -139,7 +142,7 @@ impl Op {
             OpKind::Func                => Slot::FUNC_LEFT_SLOT,
             OpKind::FuncType            => Slot::FUNC_TYPE_LEFT_SLOT,
             OpKind::Colon               => Slot::COLON_LEFT_SLOT,
-            
+            OpKind::Tuple               => Slot::TUPLE_SLOT,
         }
     }
 
@@ -174,7 +177,8 @@ impl Op {
             OpKind::Let                 => match self.children.len() {
                 0 => Slot::LET_SLOT,
                 _ => Slot::ASSIGN_SLOT 
-            }
+            },
+            OpKind::Tuple               => Slot::TUPLE_SLOT,
         }
     }
 
@@ -223,6 +227,7 @@ impl Op {
             OpKind::Colon | 
             OpKind::Apposition | 
             OpKind::Root |
+            OpKind::Tuple |
             OpKind::Let                 => Ok(())   
         }
     }
@@ -270,6 +275,10 @@ impl Op {
                     Err(ParseError::InvalidTemplate("`let` statement has more than one `:=`".to_owned()))
                 }
             },
+            (OpKind::Tuple, OpKind::Tuple) => {
+                self.push_right_option(item);
+                Ok(TemplateOutput::Op(self))
+            }
             _ => Ok(TemplateOutput::Miss(self, item, other))
         }
     }
@@ -315,6 +324,9 @@ impl TryInto<CST> for Op {
             (OpKind::BraceEnd, _) | 
             (OpKind::BracketEnd, _) | 
             (OpKind::ParenthesisEnd, _)             => unreachable!(),
+            (OpKind::Tuple, 0)                      => Ok(CST::Op(self)),
+            (OpKind::Tuple, _) if self.has_left     => Ok(CST::Op(self)),
+            (OpKind::Tuple, _)                      => Err(ParseError::IncompleteOperator(self)),
             (OpKind::If, 2 | 3) | 
             (OpKind::Add, 1 | 2) | 
             (OpKind::Sub, 1 | 2) |
@@ -644,8 +656,13 @@ mod tests {
             }.try_into().unwrap()
         }
 
-        pub fn tuple(left: CST, right: CST) -> CST {
-            todo!()
+        pub fn tuple(children: impl IntoIterator<Item = CST>) -> CST {
+            let children: VecDeque<_> = children.into_iter().collect();
+            Op {
+                kind: Tuple,
+                has_left: children.len() > 0,
+                children,
+            }.try_into().unwrap()
         }
 
         pub fn semicolon(left: CST, right: CST) -> CST {
@@ -1027,7 +1044,7 @@ mod tests {
         }
     }
     
-    
+
     mod colon {
         use super::*;
 
@@ -1134,6 +1151,113 @@ mod tests {
         }
     }
 
+    mod tup {
+        use super::*;
+
+        #[test]
+        fn three_tuple() {
+            assert_eq!(
+                parse_str("a, b, c"),
+                root(tuple([
+                    id("a"),
+                    id("b"),
+                    id("c"),
+                ]))
+            )
+        }
+
+        #[test]
+        fn tuple_apposition() {
+            assert_eq!(
+                parse_str("f x, g y"),
+                root(tuple([apposition(id("f"), id("x")), apposition(id("g"), id("y"))]))
+            )
+        }
+
+        #[test]
+        fn tuple_arithmetic() {
+            assert_eq!(
+                parse_str("a + b, c * d"),
+                root(tuple([
+                    add(id("a"), id("b")),
+                    mul(id("c"), id("d"))
+                ]))
+            )
+        }
+
+        #[test]
+        fn tuple_parens() {
+            assert_eq!(
+                parse_str("((a, b), c)"),
+                root(parenthesis(tuple([
+                    parenthesis(tuple([id("a"), id("b")])),
+                    id("c")
+                ])))
+            )
+        }
+
+        #[test]
+        fn tuple_if_conflict() {
+            assert_eq!(
+                parse_str("if a, b then c else d"),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn tuple_then_conflict() {
+            assert_eq!(
+                parse_str("if a then b, c else d"),
+                Err(ParseError::OperatorConflict)
+            )
+        }
+
+        #[test]
+        fn tuple_else() {
+            assert_eq!(
+                parse_str("if a then b else c, d"),
+                root(tuple([
+                    if_then_else(id("a"), id("b"), id("c")),
+                    id("d")
+                ]))
+            )
+        }
+
+        #[test]
+        fn tuple_func() {
+            assert_eq!(
+                parse_str("x => y, x => z"),
+                root(tuple([
+                    func(id("x"), id("y")),
+                    func(id("x"), id("z")),
+                ]))
+            )
+        }
+
+        #[test]
+        fn tuple_func_type() {
+            assert_eq!(
+                parse_str("A -> B, A -> C"),
+                root(tuple([
+                    func_type(id("A"), id("B")),
+                    func_type(id("A"), id("C")),
+                ]))
+            )
+        }
+
+        #[test]
+        fn tuple_colon() {
+            assert_eq!(
+                parse_str("a: A, b: B"),
+                root(tuple([
+                    colon(id("a"), id("A")),
+                    colon(id("b"), id("B"))
+                ]))
+            )
+        }
+        
+    }
+
     mod semicolon {
         use super::*;
 
@@ -1203,6 +1327,13 @@ mod tests {
                 root(semicolon(func(id("a"), id("b")), func(id("c"), id("d"))))
             )
         }
+
+        #[test]
+        fn semicolon_tuple_conflict() {
+            todo!()
+        }
+
+        
     }
 
     mod let_statements {
@@ -1257,6 +1388,11 @@ mod tests {
                 parse_str("let T := A -> B"),
                 root(let_statement(id("T"), func_type(id("A"), id("B"))))
             );
+        }
+
+        #[test]
+        fn let_tuple_conflict() {
+            todo!()
         }
     }
 

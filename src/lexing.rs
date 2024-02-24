@@ -28,10 +28,10 @@ pub struct SyntaxInfo;
 #[logos(skip r"[ \t\n\f]+")]
 enum Token {
     // #[regex("\"\"")]
-    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                  id_callback,    priority = 1)]
-    #[regex(r"[0-9]+",                                  nat_callback,   priority = 2)] 
-    #[regex(r"[0-9]+\.[0-9]*",                          float_callback, priority = 2)]
-    #[regex(r"([\[\]{}();:,+*-/%]|=>|->|if|then|else)", op_callback,    priority = 2)]
+    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                          id_callback,    priority = 1)]
+    #[regex(r"[0-9]+",                                          nat_callback,   priority = 2)] 
+    #[regex(r"[0-9]+\.[0-9]*",                                  float_callback, priority = 2)]
+    #[regex(r"([\[\]{}();:,+*-/%,]|=>|->|:=|let|if|then|else)",  op_callback,    priority = 2)]
     Token((TokenInfo, CST)),
 }
 
@@ -83,6 +83,9 @@ fn op_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
         "=>" => OpKind::Func,
         "->" => OpKind::FuncType,
         ":" => OpKind::Colon,
+        "let" => OpKind::Let,
+        ":=" => OpKind::Assignment,
+        "," => OpKind::Tuple,
         _ => unreachable!()
     };
     let info = TokenInfo {
@@ -124,6 +127,9 @@ pub enum OpKind {
     Colon,
     Apposition,
     Root,
+    Let,
+    Assignment,
+    Tuple,
 }
 
 impl OpKind {
@@ -131,10 +137,15 @@ impl OpKind {
     /// INVARIANT:  must agree with Op::left_slot
     pub fn has_left_slot(&self) -> bool {
         match self {
-            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis | OpKind::If => false,
-            OpKind::BraceEnd   | OpKind::BracketEnd   | OpKind::ParenthesisEnd |
-            OpKind::Add | OpKind::Sub |
-            OpKind::Mul | OpKind::Div | OpKind::Mod  |
+            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis | OpKind::If | OpKind::Let => false,
+            OpKind::BraceEnd | 
+            OpKind::BracketEnd | 
+            OpKind::ParenthesisEnd |
+            OpKind::Add | 
+            OpKind::Sub |
+            OpKind::Mul | 
+            OpKind::Div | 
+            OpKind::Mod  |
             OpKind::Apposition |
             OpKind::Root |
             OpKind::Then |
@@ -142,17 +153,27 @@ impl OpKind {
             OpKind::Semicolon |
             OpKind::Func |
             OpKind::FuncType |
-            OpKind::Colon => true
+            OpKind::Colon |
+            OpKind::Tuple |
+            OpKind::Assignment => true
         }
     }
 
-    /// INVARIANT:  must agree with Op::right_slot
+    // TODO: clarify invariant
+    /// INVARIANT: must agree with Op::right_slot
     pub fn has_right_slot(&self) -> bool {
         match self {
-            OpKind::BraceEnd   | OpKind::BracketEnd   | OpKind::ParenthesisEnd => false,
-            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis |
-            OpKind::Add | OpKind::Sub |
-            OpKind::Mul | OpKind::Div | OpKind::Mod  |
+            OpKind::BraceEnd | 
+            OpKind::BracketEnd | 
+            OpKind::ParenthesisEnd => false,
+            OpKind::Brace | 
+            OpKind::Bracket | 
+            OpKind::Parenthesis |
+            OpKind::Add | 
+            OpKind::Sub |
+            OpKind::Mul | 
+            OpKind::Div | 
+            OpKind::Mod  |
             OpKind::Apposition |
             OpKind::Root |
             OpKind::If |
@@ -161,7 +182,10 @@ impl OpKind {
             OpKind::Semicolon |
             OpKind::Func |
             OpKind::FuncType |
-            OpKind::Colon => true
+            OpKind::Colon |
+            OpKind::Let |
+            OpKind::Tuple |
+            OpKind::Assignment => true
         }
     }
 }
