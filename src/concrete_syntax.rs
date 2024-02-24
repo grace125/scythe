@@ -7,32 +7,36 @@ const TEMPLATE_PRECEDENCE: u32          = 0;
 const BRACE_PRECEDENCE: u32             = 1;
 const SEMICOLON_RIGHT_PRECEDENCE: u32   = 2;
 const SEMICOLON_LEFT_PRECEDENCE: u32    = 3;
-const IF_PRECEDENCE: u32                = 4;
-const THEN_PRECEDENCE: u32              = 5;
-const ELSE_PRECEDENCE: u32              = 6;
-const COLON_RIGHT_PRECEDENCE: u32       = 7;
-const COLON_LEFT_PRECEDENCE: u32        = 8;
-const FUNC_RIGHT_PRECEDENCE: u32        = 9;
-const FUNC_LEFT_PRECEDENCE: u32         = 10;
-const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 11;
-const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 12;
-const SUM_PRECEDENCE: u32               = 13;
-const PROD_PRECEDENCE: u32              = 14;
-const APPOSITION_RIGHT_PRECEDENCE: u32  = 15;
-const APPOSITION_LEFT_PRECEDENCE: u32   = 16;
+const LET_PRECEDENCE: u32               = 4;
+const ASSIGN_PRECEDENCE: u32            = 5;
+const IF_PRECEDENCE: u32                = 6;
+const THEN_PRECEDENCE: u32              = 7;
+const ELSE_PRECEDENCE: u32              = 8;
+const COLON_RIGHT_PRECEDENCE: u32       = 9;
+const COLON_LEFT_PRECEDENCE: u32        = 10;
+const FUNC_RIGHT_PRECEDENCE: u32        = 11;
+const FUNC_LEFT_PRECEDENCE: u32         = 12;
+const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 13;
+const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 14;
+const SUM_PRECEDENCE: u32               = 15;
+const PROD_PRECEDENCE: u32              = 16;
+const APPOSITION_RIGHT_PRECEDENCE: u32  = 17;
+const APPOSITION_LEFT_PRECEDENCE: u32   = 18;
 const NO_SLOT_PRECEDENCE: u32           = u32::MAX;
 
-const BRACE_GROUP: u32              = 0b____________1;
-const SEMICOLON_GROUP: u32          = 0b___________10;
-const IF_GROUP: u32                 = 0b__________100;
-const THEN_GROUP: u32               = 0b_________1000;
-const ELSE_GROUP: u32               = 0b________10000;
-const COLON_GROUP: u32              = 0b_______100000;
-const FUNC_GROUP: u32               = 0b______1000000;
-const FUNC_TYPE_GROUP: u32          = 0b_____10000000;
-const SUM_GROUP: u32                = 0b____100000000;
-const PROD_GROUP: u32               = 0b___1000000000;
-const APPOSITION_GROUP: u32         = 0b__10000000000;
+const BRACE_GROUP: u32              = 0b______________1;
+const SEMICOLON_GROUP: u32          = 0b_____________10;
+const IF_GROUP: u32                 = 0b____________100;
+const THEN_GROUP: u32               = 0b___________1000;
+const ELSE_GROUP: u32               = 0b__________10000;
+const COLON_GROUP: u32              = 0b_________100000;
+const FUNC_GROUP: u32               = 0b________1000000;
+const FUNC_TYPE_GROUP: u32          = 0b_______10000000;
+const SUM_GROUP: u32                = 0b______100000000;
+const PROD_GROUP: u32               = 0b_____1000000000;
+const APPOSITION_GROUP: u32         = 0b____10000000000;
+const LET_GROUP: u32                = 0b___100000000000;
+const ASSIGN_GROUP: u32             = 0b__1000000000000;
 
 pub struct Slot {
     precedence: u32,
@@ -58,6 +62,8 @@ impl Slot {
     pub const PROD_SLOT: Slot               = Slot::new(PROD_PRECEDENCE,                PROD_GROUP,             0);
     pub const APPOSITION_RIGHT_SLOT: Slot   = Slot::new(APPOSITION_RIGHT_PRECEDENCE,    APPOSITION_GROUP,       FUNC_GROUP | FUNC_TYPE_GROUP);
     pub const APPOSITION_LEFT_SLOT: Slot    = Slot::new(APPOSITION_LEFT_PRECEDENCE,     APPOSITION_GROUP,       ELSE_GROUP);
+    pub const LET_SLOT: Slot                = Slot::new(LET_PRECEDENCE,                 LET_GROUP,              0);
+    pub const ASSIGN_SLOT: Slot             = Slot::new(ASSIGN_PRECEDENCE,              ASSIGN_GROUP,           0);
     pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_PRECEDENCE,             0,                      0);
 
     const fn new(precedence: u32, conflict_groups: u32, conflict_masks: u32) -> Self {
@@ -113,10 +119,14 @@ impl Op {
             OpKind::Brace | 
             OpKind::Bracket | 
             OpKind::Parenthesis |
-            OpKind::If                  => Slot::NO_SLOT,
+            OpKind::If |
+            OpKind::Let                 => Slot::NO_SLOT,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
             OpKind::ParenthesisEnd      => Slot::BRACE_SLOT.with_template_precedence(),
+            OpKind::Assignment          => Slot::ASSIGN_SLOT.with_template_precedence(),
+            OpKind::Then                => Slot::THEN_SLOT.with_template_precedence(),
+            OpKind::Else                => Slot::ELSE_SLOT.with_template_precedence(),
             OpKind::Add | 
             OpKind::Sub                 => Slot::SUM_SLOT,
             OpKind::Mul | 
@@ -124,12 +134,12 @@ impl Op {
             OpKind::Mod                 => Slot::PROD_SLOT,
             OpKind::Apposition          => Slot::APPOSITION_LEFT_SLOT,
             OpKind::Root                => Slot::ROOT_SLOT,
-            OpKind::Then                => Slot::THEN_SLOT.with_template_precedence(),
-            OpKind::Else                => Slot::ELSE_SLOT.with_template_precedence(),
+            
             OpKind::Semicolon           => Slot::SEMICOLON_LEFT_SLOT,
             OpKind::Func                => Slot::FUNC_LEFT_SLOT,
             OpKind::FuncType            => Slot::FUNC_TYPE_LEFT_SLOT,
             OpKind::Colon               => Slot::COLON_LEFT_SLOT,
+            
         }
     }
 
@@ -140,7 +150,10 @@ impl Op {
             OpKind::Parenthesis    => Slot::BRACE_SLOT,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
-            OpKind::ParenthesisEnd      => unreachable!(),
+            OpKind::ParenthesisEnd |
+            OpKind::Then |
+            OpKind::Else |
+            OpKind::Assignment          => unreachable!(),
             OpKind::Add | 
             OpKind::Sub                 => if !self.has_left && self.children.len() == 0 { Slot::PROD_SLOT } else { Slot::SUM_SLOT },
             OpKind::Mul | 
@@ -153,12 +166,15 @@ impl Op {
                 1 => Slot::THEN_SLOT,
                 _ => Slot::ELSE_SLOT
             },
-            OpKind::Then                => unreachable!(),
-            OpKind::Else                => unreachable!(),
+            
             OpKind::Semicolon           => Slot::SEMICOLON_RIGHT_SLOT,
             OpKind::Func                => Slot::FUNC_RIGHT_SLOT,
             OpKind::FuncType            => Slot::FUNC_TYPE_RIGHT_SLOT,
-            OpKind::Colon               => Slot::COLON_RIGHT_SLOT
+            OpKind::Colon               => Slot::COLON_RIGHT_SLOT,
+            OpKind::Let                 => match self.children.len() {
+                0 => Slot::LET_SLOT,
+                _ => Slot::ASSIGN_SLOT 
+            }
         }
     }
 
@@ -186,11 +202,28 @@ impl Op {
 
     fn template_exclusive_op(&self) -> Result<(), ParseError> {
         match self.kind {
-            OpKind::BraceEnd | OpKind::BracketEnd | OpKind::ParenthesisEnd | OpKind::Then | OpKind::Else => Err(ParseError::UnusedTemplate(self.kind)),
-            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis | 
-            OpKind::Add | OpKind::Sub | OpKind::Mul | OpKind::Div | OpKind::Mod | 
-            OpKind::If | OpKind::Semicolon | OpKind::Func | OpKind::FuncType | 
-            OpKind::Colon | OpKind::Apposition | OpKind::Root                                           => Ok(())   
+            OpKind::BraceEnd | 
+            OpKind::BracketEnd |
+            OpKind::ParenthesisEnd | 
+            OpKind::Then | 
+            OpKind::Else |
+            OpKind::Assignment          => Err(ParseError::UnusedTemplate(self.kind)),
+            OpKind::Brace | 
+            OpKind::Bracket | 
+            OpKind::Parenthesis | 
+            OpKind::Add | 
+            OpKind::Sub | 
+            OpKind::Mul | 
+            OpKind::Div | 
+            OpKind::Mod | 
+            OpKind::If | 
+            OpKind::Semicolon | 
+            OpKind::Func | 
+            OpKind::FuncType | 
+            OpKind::Colon | 
+            OpKind::Apposition | 
+            OpKind::Root |
+            OpKind::Let                 => Ok(())   
         }
     }
 
@@ -224,7 +257,19 @@ impl Op {
                     Err(ParseError::InvalidEmptySlot("Expected branch between `then` and `else`, got nothing".to_owned()))
                 },
                 _ => Err(ParseError::InvalidTemplate("`if` statement has more than one `else`".to_owned()))
-            }
+            },
+            (OpKind::Let, OpKind::Assignment) => {
+                if self.children.len() == 0 {
+                    let Some(item) = item else {
+                        return Err(ParseError::InvalidEmptySlot("Expected something between `let` and `:=`, got nothing".to_owned()));
+                    };
+                    self.push_right(item);
+                    Ok(TemplateOutput::Op(self))
+                }
+                else {
+                    Err(ParseError::InvalidTemplate("`let` statement has more than one `:=`".to_owned()))
+                }
+            },
             _ => Ok(TemplateOutput::Miss(self, item, other))
         }
     }
@@ -266,6 +311,7 @@ impl TryInto<CST> for Op {
         match (self.kind, self.children.len()) {
             (OpKind::Then, _) | 
             (OpKind::Else, _) | 
+            (OpKind::Assignment, _) |
             (OpKind::BraceEnd, _) | 
             (OpKind::BracketEnd, _) | 
             (OpKind::ParenthesisEnd, _)             => unreachable!(),
@@ -281,6 +327,7 @@ impl TryInto<CST> for Op {
             (OpKind::Func, 2) |
             (OpKind::FuncType, 2) |
             (OpKind::Root, 0) |
+            (OpKind::Let, 2) |
             (OpKind::Brace, 1) | 
             (OpKind::Bracket, 1) | 
             (OpKind::Parenthesis, 1)                => Ok(CST::Op(self)),
@@ -296,6 +343,7 @@ impl TryInto<CST> for Op {
             (OpKind::Func, _) |
             (OpKind::FuncType, _) |
             (OpKind::Root, _) |
+            (OpKind::Let, _) |
             (OpKind::Brace, _) | 
             (OpKind::Bracket, _) | 
             (OpKind::Parenthesis, _)                => Err(ParseError::IncompleteOperator(self)),
@@ -596,12 +644,32 @@ mod tests {
             }.try_into().unwrap()
         }
 
+        pub fn tuple(left: CST, right: CST) -> CST {
+            todo!()
+        }
+
         pub fn semicolon(left: CST, right: CST) -> CST {
             Op {
                 kind: Semicolon,
                 has_left: true,
                 children: VecDeque::from(vec![left, right])
             }.try_into().unwrap()
+        }
+
+        pub fn let_statement(identifier: CST, content: CST) -> CST {
+            Op {
+                kind: Let,
+                has_left: false,
+                children: VecDeque::from(vec![identifier, content])
+            }.try_into().unwrap()
+        }
+
+        pub fn match_statement(object: CST, arms: CST) -> CST {
+            todo!()
+        }
+
+        pub fn match_arm(pattern: CST, body: CST) -> CST {
+            todo!()
         }
     }
 
@@ -1127,5 +1195,80 @@ mod tests {
                 root(semicolon(if_then_else(id("a"), id("b"), id("c")), id("d")))
             )
         }
+
+        #[test]
+        fn semicolon_func() {
+            assert_eq!(
+                parse_str("a => b; c => d"),
+                root(semicolon(func(id("a"), id("b")), func(id("c"), id("d"))))
+            )
+        }
+    }
+
+    mod let_statements {
+        use super::*;
+
+        #[test]
+        fn let_apposition() {
+            assert_eq!(
+                parse_str("let y := f x"),
+                root(let_statement(id("y"), apposition(id("f"), id("x"))))
+            );
+        }
+
+        #[test]
+        fn let_arithmetic() {
+            assert_eq!(
+                parse_str("let y := 5 + x; let z := +y % 2"),
+                root(semicolon(
+                    let_statement(id("y"), add(nat(5), id("x"))), 
+                    let_statement(id("z"), modulo(unary_add(id("y")), nat(2))), 
+                ))
+            );
+        }
+
+        #[test]
+        fn let_parenthesis() {
+            assert_eq!(
+                parse_str("let b := (let a := 5 / 10; a + 3)"),
+                root(let_statement(id("b"), parenthesis(semicolon(let_statement(id("a"), div(nat(5), nat(10))), add(id("a"), nat(3))))))
+            );
+        }
+
+        #[test]
+        fn let_if() {
+            assert_eq!(
+                parse_str("let a := if b then c else let d := 2"),
+                root(let_statement(id("a"), if_then_else(id("b"), id("c"), let_statement(id("d"), nat(2)))))
+            );
+        }
+
+        #[test]
+        fn let_func() {
+            assert_eq!(
+                parse_str("let f := (x: Nat) => y"),
+                root(let_statement(id("f"), func(parenthesis(colon(id("x"), id("Nat"))), id("y"))))
+            );
+        }
+
+        #[test]
+        fn let_func_type() {
+            assert_eq!(
+                parse_str("let T := A -> B"),
+                root(let_statement(id("T"), func_type(id("A"), id("B"))))
+            );
+        }
+    }
+
+    mod match_statements {
+        use super::*;
+
+        // #[test]
+        // fn match_apposition() {
+        //     assert_eq!(
+        //         parse_str("match f x on { g y ==> y, h z ==> z }"),
+        //         root(match_statement(apposition(id("f"), id("x")), ))
+        //     )
+        // }
     }
 }
