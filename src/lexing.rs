@@ -22,16 +22,18 @@ pub struct SyntaxInfo;
 //     column_end: usize
 // }
 
+// TODO: use tokens instead of big regex
+// TODO: add string literals
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(error = LexingError)]
 #[logos(extras = TokenExtras)]
 #[logos(skip r"[ \t\n\f]+")]
 enum Token {
     // #[regex("\"\"")]
-    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                          id_callback,    priority = 1)]
-    #[regex(r"[0-9]+",                                          nat_callback,   priority = 2)] 
-    #[regex(r"[0-9]+\.[0-9]*",                                  float_callback, priority = 2)]
-    #[regex(r"([\[\]{}();:,+*-/%,]|=>|->|:=|let|if|then|else)",  op_callback,    priority = 2)]
+    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                                          id_callback,    priority = 1)]
+    #[regex(r"[0-9]+",                                                          nat_callback,   priority = 2)] 
+    #[regex(r"[0-9]+\.[0-9]*",                                                  float_callback, priority = 2)]
+    #[regex(r"([\[\]{}();:,+*-/%,]|=>|->|:=|let|if|then|else|match|on|==>)",    op_callback,    priority = 2)]
     Token((TokenInfo, CST)),
 }
 
@@ -86,6 +88,9 @@ fn op_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
         "let" => OpKind::Let,
         ":=" => OpKind::Assignment,
         "," => OpKind::Tuple,
+        "match" => OpKind::Match,
+        "on" => OpKind::On,
+        "==>" => OpKind::MatchArm,
         _ => unreachable!()
     };
     let info = TokenInfo {
@@ -105,6 +110,7 @@ pub enum LexingError {
     NonAsciiCharacter,
 }
 
+// TODO: get rid of root node(?)
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum OpKind {
     Brace,
@@ -130,6 +136,9 @@ pub enum OpKind {
     Let,
     Assignment,
     Tuple,
+    Match,
+    On,
+    MatchArm
 }
 
 impl OpKind {
@@ -137,7 +146,12 @@ impl OpKind {
     /// INVARIANT:  must agree with Op::left_slot
     pub fn has_left_slot(&self) -> bool {
         match self {
-            OpKind::Brace | OpKind::Bracket | OpKind::Parenthesis | OpKind::If | OpKind::Let => false,
+            OpKind::Brace | 
+            OpKind::Bracket | 
+            OpKind::Parenthesis | 
+            OpKind::If | 
+            OpKind::Match |
+            OpKind::Let             => false,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
             OpKind::ParenthesisEnd |
@@ -155,7 +169,9 @@ impl OpKind {
             OpKind::FuncType |
             OpKind::Colon |
             OpKind::Tuple |
-            OpKind::Assignment => true
+            OpKind::MatchArm |
+            OpKind::On |
+            OpKind::Assignment      => true
         }
     }
 
@@ -185,6 +201,9 @@ impl OpKind {
             OpKind::Colon |
             OpKind::Let |
             OpKind::Tuple |
+            OpKind::Match |
+            OpKind::On |
+            OpKind::MatchArm |
             OpKind::Assignment => true
         }
     }

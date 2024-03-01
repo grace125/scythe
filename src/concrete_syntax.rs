@@ -7,38 +7,49 @@ const TEMPLATE_PRECEDENCE: u32          = 0;
 const BRACE_PRECEDENCE: u32             = 1;
 const SEMICOLON_RIGHT_PRECEDENCE: u32   = 2;
 const SEMICOLON_LEFT_PRECEDENCE: u32    = 3;
-const LET_PRECEDENCE: u32               = 4;
-const ASSIGN_PRECEDENCE: u32            = 5;
-const TUPLE_PRECEDENCE: u32             = 6;
-const IF_PRECEDENCE: u32                = 7;
-const THEN_PRECEDENCE: u32              = 8;
-const ELSE_PRECEDENCE: u32              = 9;
-const COLON_RIGHT_PRECEDENCE: u32       = 10;
-const COLON_LEFT_PRECEDENCE: u32        = 11;
-const FUNC_RIGHT_PRECEDENCE: u32        = 12;
-const FUNC_LEFT_PRECEDENCE: u32         = 13;
-const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 14;
-const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 15;
-const SUM_PRECEDENCE: u32               = 16;
-const PROD_PRECEDENCE: u32              = 17;
-const APPOSITION_RIGHT_PRECEDENCE: u32  = 18;
-const APPOSITION_LEFT_PRECEDENCE: u32   = 19;
+const TUPLE_PRECEDENCE: u32             = 4;
+const MATCH_ARM_PRECEDENCE: u32         = 5;
+const LET_PRECEDENCE: u32               = 6;
+const ASSIGN_PRECEDENCE: u32            = 7;
+const MATCH_PRECEDENCE: u32             = 8;
+const ON_PRECEDENCE: u32                = 9;
+const IF_PRECEDENCE: u32                = 10;
+const THEN_PRECEDENCE: u32              = 11;
+const ELSE_PRECEDENCE: u32              = 12;
+const COLON_RIGHT_PRECEDENCE: u32       = 13;
+const COLON_LEFT_PRECEDENCE: u32        = 14;
+const FUNC_RIGHT_PRECEDENCE: u32        = 15;
+const FUNC_LEFT_PRECEDENCE: u32         = 16;
+const FUNC_TYPE_RIGHT_PRECEDENCE: u32   = 17;
+const FUNC_TYPE_LEFT_PRECEDENCE: u32    = 18;
+const SUM_PRECEDENCE: u32               = 19;
+const PROD_PRECEDENCE: u32              = 20;
+const APPOSITION_RIGHT_PRECEDENCE: u32  = 21;
+const APPOSITION_LEFT_PRECEDENCE: u32   = 22;
 const NO_SLOT_PRECEDENCE: u32           = u32::MAX;
 
-const BRACE_GROUP: u32              = 0b______________1;
-const SEMICOLON_GROUP: u32          = 0b_____________10;
-const IF_GROUP: u32                 = 0b____________100;
-const THEN_GROUP: u32               = 0b___________1000;
-const ELSE_GROUP: u32               = 0b__________10000;
-const COLON_GROUP: u32              = 0b_________100000;
-const FUNC_GROUP: u32               = 0b________1000000;
-const FUNC_TYPE_GROUP: u32          = 0b_______10000000;
-const SUM_GROUP: u32                = 0b______100000000;
-const PROD_GROUP: u32               = 0b_____1000000000;
-const APPOSITION_GROUP: u32         = 0b____10000000000;
-const LET_GROUP: u32                = 0b___100000000000;
-const ASSIGN_GROUP: u32             = 0b__1000000000000;
-const TUPLE_GROUP: u32              = 0b_10000000000000;
+const BRACE_GROUP: u32              = 0b_________________1;
+const SEMICOLON_GROUP: u32          = 0b________________10;
+const TUPLE_GROUP: u32              = 0b_______________100;
+const MATCH_ARM_GROUP: u32          = 0b______________1000;
+const LET_GROUP: u32                = 0b_____________10000;
+const ASSIGN_GROUP: u32             = 0b____________100000;
+const MATCH_GROUP: u32              = 0b___________1000000;
+const ON_GROUP: u32                 = 0b__________10000000;
+const IF_GROUP: u32                 = 0b_________100000000;
+const THEN_GROUP: u32               = 0b________1000000000;
+const ELSE_GROUP: u32               = 0b_______10000000000;
+const COLON_GROUP: u32              = 0b______100000000000;
+const FUNC_GROUP: u32               = 0b_____1000000000000;
+const FUNC_TYPE_GROUP: u32          = 0b____10000000000000;
+const SUM_GROUP: u32                = 0b___100000000000000;
+const PROD_GROUP: u32               = 0b__1000000000000000;
+const APPOSITION_GROUP: u32         = 0b_10000000000000000;
+
+
+
+
+
 
 pub struct Slot {
     precedence: u32,
@@ -67,6 +78,9 @@ impl Slot {
     pub const LET_SLOT: Slot                = Slot::new(LET_PRECEDENCE,                 LET_GROUP,              0);
     pub const ASSIGN_SLOT: Slot             = Slot::new(ASSIGN_PRECEDENCE,              ASSIGN_GROUP,           0);
     pub const TUPLE_SLOT: Slot              = Slot::new(TUPLE_PRECEDENCE,               TUPLE_GROUP,            SEMICOLON_GROUP | ASSIGN_GROUP | LET_GROUP | IF_GROUP | THEN_GROUP);
+    pub const MATCH_SLOT: Slot              = Slot::new(MATCH_PRECEDENCE,               MATCH_GROUP,            0);
+    pub const ON_SLOT: Slot                 = Slot::new(ON_PRECEDENCE,                  ON_GROUP,               0);
+    pub const MATCH_ARM_SLOT: Slot          = Slot::new(MATCH_ARM_PRECEDENCE,           MATCH_ARM_GROUP,        0);
     pub const NO_SLOT: Slot                 = Slot::new(NO_SLOT_PRECEDENCE,             0,                      0);
 
     const fn new(precedence: u32, conflict_groups: u32, conflict_masks: u32) -> Self {
@@ -123,13 +137,17 @@ impl Op {
             OpKind::Bracket | 
             OpKind::Parenthesis |
             OpKind::If |
+            OpKind::Match |
             OpKind::Let                 => Slot::NO_SLOT,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
-            OpKind::ParenthesisEnd      => Slot::BRACE_SLOT.with_template_precedence(),
+            // TODO: should I be giving these templates super low precedence?
+            OpKind::ParenthesisEnd      => Slot::BRACE_SLOT.with_template_precedence(), 
             OpKind::Assignment          => Slot::ASSIGN_SLOT.with_template_precedence(),
             OpKind::Then                => Slot::THEN_SLOT.with_template_precedence(),
             OpKind::Else                => Slot::ELSE_SLOT.with_template_precedence(),
+            OpKind::On                  => Slot::MATCH_SLOT.with_template_precedence(),
+            OpKind::MatchArm            => Slot::MATCH_ARM_SLOT,
             OpKind::Add | 
             OpKind::Sub                 => Slot::SUM_SLOT,
             OpKind::Mul | 
@@ -137,7 +155,6 @@ impl Op {
             OpKind::Mod                 => Slot::PROD_SLOT,
             OpKind::Apposition          => Slot::APPOSITION_LEFT_SLOT,
             OpKind::Root                => Slot::ROOT_SLOT,
-            
             OpKind::Semicolon           => Slot::SEMICOLON_LEFT_SLOT,
             OpKind::Func                => Slot::FUNC_LEFT_SLOT,
             OpKind::FuncType            => Slot::FUNC_TYPE_LEFT_SLOT,
@@ -150,12 +167,13 @@ impl Op {
         match self.kind {
             OpKind::Brace | 
             OpKind::Bracket | 
-            OpKind::Parenthesis    => Slot::BRACE_SLOT,
+            OpKind::Parenthesis         => Slot::BRACE_SLOT,
             OpKind::BraceEnd | 
             OpKind::BracketEnd | 
             OpKind::ParenthesisEnd |
             OpKind::Then |
             OpKind::Else |
+            OpKind::On |
             OpKind::Assignment          => unreachable!(),
             OpKind::Add | 
             OpKind::Sub                 => if !self.has_left && self.children.len() == 0 { Slot::PROD_SLOT } else { Slot::SUM_SLOT },
@@ -179,6 +197,11 @@ impl Op {
                 _ => Slot::ASSIGN_SLOT 
             },
             OpKind::Tuple               => Slot::TUPLE_SLOT,
+            OpKind::Match               => match self.children.len() {
+                0 => Slot::MATCH_SLOT,
+                _ => Slot::ON_SLOT
+            },
+            OpKind::MatchArm            => Slot::MATCH_ARM_SLOT
         }
     }
 
@@ -211,6 +234,7 @@ impl Op {
             OpKind::ParenthesisEnd | 
             OpKind::Then | 
             OpKind::Else |
+            OpKind::On |
             OpKind::Assignment          => Err(ParseError::UnusedTemplate(self.kind)),
             OpKind::Brace | 
             OpKind::Bracket | 
@@ -228,6 +252,8 @@ impl Op {
             OpKind::Apposition | 
             OpKind::Root |
             OpKind::Tuple |
+            OpKind::Match |
+            OpKind::MatchArm |
             OpKind::Let                 => Ok(())   
         }
     }
@@ -259,20 +285,32 @@ impl Op {
                     self.push_right(item);
                     Ok(TemplateOutput::Op(self))
                 } else {
-                    Err(ParseError::InvalidEmptySlot("Expected branch between `then` and `else`, got nothing".to_owned()))
+                    Err(ParseError::InvalidEmptySlot("Expected branch between `then` and `else`".to_owned()))
                 },
                 _ => Err(ParseError::InvalidTemplate("`if` statement has more than one `else`".to_owned()))
             },
             (OpKind::Let, OpKind::Assignment) => {
                 if self.children.len() == 0 {
                     let Some(item) = item else {
-                        return Err(ParseError::InvalidEmptySlot("Expected something between `let` and `:=`, got nothing".to_owned()));
+                        return Err(ParseError::InvalidEmptySlot("Expected something between `let` and `:=`".to_owned()));
                     };
                     self.push_right(item);
                     Ok(TemplateOutput::Op(self))
                 }
                 else {
                     Err(ParseError::InvalidTemplate("`let` statement has more than one `:=`".to_owned()))
+                }
+            },
+            (OpKind::Match, OpKind::On) => {
+                if self.children.len() == 0 {
+                    let Some(item) = item else {
+                        return Err(ParseError::InvalidEmptySlot("Expected something between `match` and `on`".to_owned()));
+                    };
+                    self.push_right(item);
+                    Ok(TemplateOutput::Op(self))
+                }
+                else {
+                    Err(ParseError::InvalidTemplate("`match` statement has more than one `on`".to_owned()))
                 }
             },
             (OpKind::Tuple, OpKind::Tuple) => {
@@ -320,6 +358,7 @@ impl TryInto<CST> for Op {
         match (self.kind, self.children.len()) {
             (OpKind::Then, _) | 
             (OpKind::Else, _) | 
+            (OpKind::On, _) |
             (OpKind::Assignment, _) |
             (OpKind::BraceEnd, _) | 
             (OpKind::BracketEnd, _) | 
@@ -340,6 +379,8 @@ impl TryInto<CST> for Op {
             (OpKind::FuncType, 2) |
             (OpKind::Root, 0) |
             (OpKind::Let, 2) |
+            (OpKind::Match, 2) |
+            (OpKind::MatchArm, 2) |
             (OpKind::Brace, 1) | 
             (OpKind::Bracket, 1) | 
             (OpKind::Parenthesis, 1)                => Ok(CST::Op(self)),
@@ -356,6 +397,8 @@ impl TryInto<CST> for Op {
             (OpKind::FuncType, _) |
             (OpKind::Root, _) |
             (OpKind::Let, _) |
+            (OpKind::Match, _) |
+            (OpKind::MatchArm, _) |
             (OpKind::Brace, _) | 
             (OpKind::Bracket, _) | 
             (OpKind::Parenthesis, _)                => Err(ParseError::IncompleteOperator(self)),
@@ -681,12 +724,20 @@ mod tests {
             }.try_into().unwrap()
         }
 
-        pub fn match_statement(object: CST, arms: CST) -> CST {
-            todo!()
+        pub fn match_statement(object: CST, arms: impl IntoIterator<Item = CST>) -> CST {
+            Op {
+                kind: Match,
+                has_left: false,
+                children: VecDeque::from(vec![object, brace(tuple(arms))])
+            }.try_into().unwrap()
         }
 
         pub fn match_arm(pattern: CST, body: CST) -> CST {
-            todo!()
+            Op {
+                kind: MatchArm,
+                has_left: true,
+                children: VecDeque::from(vec![pattern, body])
+            }.try_into().unwrap()
         }
     }
 
@@ -973,7 +1024,6 @@ mod tests {
         }
     }
 
-    
     mod func_type {
         use super::*;
 
@@ -1044,7 +1094,6 @@ mod tests {
         }
     }
     
-
     mod colon {
         use super::*;
 
@@ -1321,19 +1370,17 @@ mod tests {
         }
 
         #[test]
-        fn semicolon_func() {
+        fn semicolon_func() { 
             assert_eq!(
                 parse_str("a => b; c => d"),
                 root(semicolon(func(id("a"), id("b")), func(id("c"), id("d"))))
             )
         }
 
-        #[test]
-        fn semicolon_tuple_conflict() {
-            todo!()
-        }
-
-        
+        // #[test]
+        // fn semicolon_tuple_conflict() {
+        //     todo!()
+        // }
     }
 
     mod let_statements {
@@ -1390,21 +1437,27 @@ mod tests {
             );
         }
 
-        #[test]
-        fn let_tuple_conflict() {
-            todo!()
-        }
+        // #[test]
+        // fn let_tuple_conflict() {
+        //     todo!()
+        // }
     }
 
     mod match_statements {
         use super::*;
 
-        // #[test]
-        // fn match_apposition() {
-        //     assert_eq!(
-        //         parse_str("match f x on { g y ==> y, h z ==> z }"),
-        //         root(match_statement(apposition(id("f"), id("x")), ))
-        //     )
-        // }
+        #[test]
+        fn match_apposition() {
+            assert_eq!(
+                parse_str("match f x on { g y ==> h z, h z ==> i w }"),
+                root(match_statement(apposition(id("f"), id("x")), [
+                    match_arm(apposition(id("g"), id("y")), apposition(id("h"), id("z"))),
+                    match_arm(apposition(id("h"), id("z")), apposition(id("i"), id("w")))
+                ]))
+            )
+        }
+
+        // TODO: test match conflicts
+        // TODO: test match against above elements
     }
 }
