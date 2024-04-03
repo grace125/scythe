@@ -17,9 +17,18 @@ pub enum SurfaceTerm {
 }
 
 #[derive(Default, Debug)]
-pub struct SurfaceEnvironment {
+struct SurfaceEnvironment {
     variables: HashMap<String, GenericTerm>,
     history: Vec<HistoryItem>,
+}
+
+impl SurfaceEnvironment {
+    pub fn from_ctx(ctx: &Context) -> Self {
+        Self {
+            variables: ctx.surface_variables.clone(),
+            history: Vec::new()
+        }
+    }
 }
 
 impl SurfaceEnvironment {
@@ -56,31 +65,37 @@ enum HistoryItem {
     Variable(String, Option<GenericTerm>)
 }
 
-pub fn to_core(ctx: &mut Context, sctx: &mut SurfaceEnvironment, surface: SurfaceTerm) -> Result<Term, IdentifierError> {
+pub fn to_core(ctx: &mut Context, surface: SurfaceTerm) -> Result<Term, IdentifierError> {
+    let senv = &mut SurfaceEnvironment::from_ctx(ctx);
+    to_core_inner(ctx, senv, surface)
+}
+
+fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: SurfaceTerm) -> Result<Term, IdentifierError> {
+    
     match surface {
         SurfaceTerm::Generic(id) => {
-            let generic_term = sctx.get_variable(id)?;
+            let generic_term = senv.get_variable(id)?;
             Ok(generic_term.into())
         }
         SurfaceTerm::Func(arg, body) => {
-            sctx.start_scope();
-            let patt = surface_bind_pattern(ctx, sctx, arg)?;
-            let body = to_core(ctx, sctx, *body)?;
-            sctx.end_scope();
+            senv.start_scope();
+            let patt = surface_bind_pattern(ctx, senv, arg)?;
+            let body = to_core_inner(ctx, senv, *body)?;
+            senv.end_scope();
             Ok(Term::Func(patt, Box::new(body)))
         },
         SurfaceTerm::Call(f, x) => {
-            let f = to_core(ctx, sctx, *f)?;
-            let x = to_core(ctx, sctx, *x)?;
+            let f = to_core_inner(ctx, senv, *f)?;
+            let x = to_core_inner(ctx, senv, *x)?;
             Ok(Term::Call(Box::new(f), Box::new(x)))
         },
         SurfaceTerm::EmptyTuple => Ok(Term::EmptyTuple),
         SurfaceTerm::FuncType(patt, arg_type, body_type) => {
-            let arg_type = to_core(ctx, sctx, *arg_type)?;
-            sctx.start_scope();
-            let patt = surface_bind_pattern(ctx, sctx, patt)?;
-            let body_type = to_core(ctx, sctx, *body_type)?;
-            sctx.end_scope();
+            let arg_type = to_core_inner(ctx, senv, *arg_type)?;
+            senv.start_scope();
+            let patt = surface_bind_pattern(ctx, senv, patt)?;
+            let body_type = to_core_inner(ctx, senv, *body_type)?;
+            senv.end_scope();
             Ok(Term::FuncType(patt, Box::new(arg_type), Box::new(body_type)))
         },
         SurfaceTerm::Unit => Ok(Term::Unit),
@@ -88,19 +103,28 @@ pub fn to_core(ctx: &mut Context, sctx: &mut SurfaceEnvironment, surface: Surfac
     }
 }
 
-fn surface_bind_pattern(ctx: &mut Context, sctx: &mut SurfaceEnvironment, patt: SurfacePattern) -> Result<Pattern, IdentifierError> {
+fn surface_bind_pattern(ctx: &mut Context, senv: &mut SurfaceEnvironment, patt: SurfacePattern) -> Result<Pattern, IdentifierError> {
     match patt {
-        SurfacePattern::Generic(id) => Ok(Pattern::Generic(sctx.new_variable(ctx, id))),
+        SurfacePattern::Generic(id) => {
+            if ctx.keywords.contains(&id) {
+                Err(IdentifierError::KeywordInPattern(id))
+            }
+            else {
+                Ok(Pattern::Generic(senv.new_variable(ctx, id)))
+            }
+            
+        },
         SurfacePattern::Annotation(patt_inner, type_id) => {
-            let type_term = to_core(ctx, sctx, *type_id)?;
-            Ok(Pattern::Annotation(Box::new(surface_bind_pattern(ctx, sctx, *patt_inner)?), Box::new(type_term.into())))
+            let type_term = to_core_inner(ctx, senv, *type_id)?;
+            Ok(Pattern::Annotation(Box::new(surface_bind_pattern(ctx, senv, *patt_inner)?), Box::new(type_term.into())))
         },
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum IdentifierError {
-    IdentifierNotFound(String)
+    IdentifierNotFound(String),
+    KeywordInPattern(String)
 }
 
 #[cfg(test)]
@@ -110,11 +134,29 @@ pub mod tests {
 
     #[test]
     fn correct_var_1() {
-        let mut ctx = Context::default();
+        let ctx = &mut Context::empty();
 
-        let term_1 = to_core(&mut ctx, &mut SurfaceEnvironment::default(), func(pattern::var("x"), func(pattern::var("x"), var("x")))).unwrap();
-        let term_2 = to_core(&mut ctx, &mut SurfaceEnvironment::default(), func(pattern::var("x"), func(pattern::var("y"), var("y")))).unwrap();
+        let term_1 = to_core_inner(ctx, &mut SurfaceEnvironment::default(), func(pattern::var("x"), func(pattern::var("x"), var("x")))).unwrap();
+        let term_2 = to_core_inner(ctx, &mut SurfaceEnvironment::default(), func(pattern::var("x"), func(pattern::var("y"), var("y")))).unwrap();
 
-        assert!(term_eq(&mut ctx, term_1, term_2).unwrap());
+        assert!(term_eq(ctx, term_1, term_2).unwrap());
+    }
+
+    #[test]
+    pub fn unit_by_generic() {
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
+        let l = &mut surface_evaluate_with_context(ctx, UNIT).unwrap();
+        let r = &mut surface_evaluate_with_context(ctx, SurfaceTerm::Generic("Unit".into())).unwrap();
+        assert!(def_equal(ctx, env, l, r).unwrap())
+    }
+
+    #[test]
+    pub fn type_by_generic() {
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
+        let l = &mut surface_evaluate_with_context(ctx, TYPE).unwrap();
+        let r = &mut surface_evaluate_with_context(ctx, SurfaceTerm::Generic("Type".into())).unwrap();
+        assert!(def_equal(ctx, env, l, r).unwrap())
     }
 }

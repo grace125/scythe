@@ -12,7 +12,7 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
         Term::Func(patt, body) => {
             let g = GenericValue::new();
             let Value::FuncType(mut term_env, func_patt, func_arg_type, body_type) = ty else {
-                todo!() // Return error
+                todo!() // Improve error
             };
 
             term_env.start_scope();
@@ -93,7 +93,7 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
             let (f, f_type) = infer(ctx, env, *f)?;
             
             let Value::FuncType(mut ft_env, ft_patt, ft_arg_type, ft_body_type) = f_type else { 
-                todo!() // FIXME: throw appropriate error
+                todo!() // TODO: Improve error
             };
 
             let x = check(ctx, env, *x, *ft_arg_type.clone())?;
@@ -130,20 +130,19 @@ pub mod tests {
     use super::{*, super::tests::*};
 
     pub fn surface_check(s: SurfaceTerm, ty: SurfaceTerm) -> Result<Term, ElaborationError> {
-        let mut ctx = Context::default();
+        let mut ctx = Context::empty();
         surface_check_with_context(&mut ctx, s, ty)
     }
 
     pub fn surface_check_with_context(ctx: &mut Context, s: SurfaceTerm, ty: SurfaceTerm) -> Result<Term, ElaborationError> {
-        let mut senv = SurfaceEnvironment::default();
-        let mut env = Environment::default();
+        let env = &mut ctx.global_environment();
 
-        let term_ty = to_core(ctx, &mut senv, ty).unwrap();
-        let term = to_core(ctx, &mut senv, s).unwrap();
+        let term_ty = to_core(ctx, ty).unwrap();
+        let term = to_core(ctx, s).unwrap();
 
-        let term_ty = evaluate(ctx, &mut env, term_ty).unwrap();
+        let term_ty = evaluate(ctx, env, term_ty).unwrap();
         println!("Checking starts here.");
-        check(ctx, &mut env, term, term_ty)
+        check(ctx, env, term, term_ty)
     }
 
     // pub fn surface_infer(s: SurfaceTerm) -> Result<(Term, Value), ElaborationError> {
@@ -152,12 +151,11 @@ pub mod tests {
     // }
 
     pub fn surface_infer_with_context(ctx: &mut Context, s: SurfaceTerm) -> Result<(Term, Value), ElaborationError> {
-        let mut senv = SurfaceEnvironment::default();
-        let mut env = Environment::default();
+        let env = &mut ctx.global_environment();
 
-        let term = to_core(ctx, &mut senv, s).unwrap();
+        let term = to_core(ctx, s).unwrap();
         println!("Inferrence starts here.");
-        infer(ctx, &mut env, term)
+        infer(ctx, env, term)
     }
 
     #[test]
@@ -185,25 +183,23 @@ pub mod tests {
 
     #[test]
     fn infer_func_1() {
-        let mut ctx = Context::default();
-        let mut env = Environment::default();
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
 
-        let (_, mut ty) = surface_infer_with_context(&mut ctx, func(pattern::annot(pattern::var("x"), UNIT), var("x"))).unwrap();
+        let (_, mut ty) = surface_infer_with_context(ctx, func(pattern::annot(pattern::var("x"), UNIT), var("x"))).unwrap();
 
-        let mut ty_prime = surface_evaluate_with_context(&mut ctx, func_type(pattern::var("x"), UNIT, UNIT)).unwrap();
+        let mut ty_prime = surface_evaluate_with_context(ctx, func_type(pattern::var("x"), UNIT, UNIT)).unwrap();
 
-        assert!(def_equal(&mut ctx, &mut env, &mut ty, &mut ty_prime).unwrap());
+        assert!(def_equal(ctx, env, &mut ty, &mut ty_prime).unwrap());
     }
 
     #[test]
     fn infer_empty_tuple() {
-        let mut ctx = Context::default();
-        let mut env = Environment::default();
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
 
-        let (_, mut ty) = surface_infer_with_context(&mut ctx, EMPTY_TUPLE).unwrap();
+        let (_, mut ty) = surface_infer_with_context(ctx, EMPTY_TUPLE).unwrap();
 
-        assert!(def_equal(&mut ctx, &mut env, &mut ty, &mut Value::Unit).unwrap())
+        assert!(def_equal(ctx, env, &mut ty, &mut Value::Unit).unwrap())
     }
-
-    
 }

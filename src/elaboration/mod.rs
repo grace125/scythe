@@ -97,7 +97,7 @@ pub mod tests {
 
     use crate::elaboration::{Term, Context};
 
-    use super::{to_core, IdentifierError, SurfaceEnvironment, SurfacePattern, SurfaceTerm};
+    use super::{to_core, IdentifierError, SurfacePattern, SurfaceTerm};
 
     pub const UNIT: SurfaceTerm = SurfaceTerm::Unit;
     pub const TYPE: SurfaceTerm = SurfaceTerm::Type;
@@ -132,14 +132,13 @@ pub mod tests {
     }
 
     pub fn core(t: SurfaceTerm) -> Result<Term, IdentifierError> {
-        let mut senv = SurfaceEnvironment::default();
-        let mut ctx = Context::default();
-        to_core(&mut ctx, &mut senv, t)
+        let mut ctx = Context::empty();
+        to_core(&mut ctx, t)
     }
 
     // TODO: determine if this is even correct
     pub fn term_eq(ctx: &mut Context, l: Term, r: Term) -> Result<bool, ElaborationError> {
-        let mut env = Environment::default();
+        let mut env = &mut ctx.global_environment();
         let l = evaluate(ctx, &mut env, l);
         println!("{:#?}\n", &ctx);
         println!("{:#?}\n", &env);
@@ -148,14 +147,13 @@ pub mod tests {
     }
 
     pub fn surface_evaluate(s: SurfaceTerm) -> Result<Value, ElaborationError> {
-        let mut ctx = Context::default();
+        let mut ctx = Context::empty();
         surface_evaluate_with_context(&mut ctx, s)
     }
 
     pub fn surface_evaluate_with_context(ctx: &mut Context, s: SurfaceTerm) -> Result<Value, ElaborationError> {
-        let mut senv = SurfaceEnvironment::default();
-        let mut env = Environment::default();
-        let term = to_core(ctx, &mut senv, s).unwrap();
+        let mut env = &mut ctx.global_environment();
+        let term = to_core(ctx, s).unwrap();
         evaluate(ctx, &mut env, term)
     }
 }

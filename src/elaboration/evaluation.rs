@@ -84,8 +84,6 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
             Box::new(quote(ctx, env, (*n).into())?), 
             Box::new(quote(ctx, env, *v)?)
         )),
-        
-        // Value::BinaryTuple(a, b) => Ok(Term::BinaryTuple(Box::new(env.quote(*a)?), Box::new(env.quote(*b)?))),
         Value::Func(mut func_env, arg, body) => { // TODO: fix function quoting's exponential behaviour
             func_env.start_scope();
             env.start_scope();
@@ -103,7 +101,25 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
 
             Ok(f)
         },
-        Value::FuncType(..) => todo!(), // TODO: implement quoting for FuncType
+        Value::FuncType(mut func_env, arg, arg_type, body_type) => {
+            func_env.start_scope();
+            env.start_scope();
+
+            let arg_type_term = Box::new(quote(ctx, env, *arg_type)?);
+
+            let g = GenericValue::new();
+
+            bind(ctx, &mut func_env, &arg, g.into())?;
+            bind(ctx, env, &arg, g.into())?;
+
+            let body_type_val = evaluate(ctx, &mut func_env, *body_type)?;
+            let f = Term::FuncType(arg, arg_type_term, Box::new(quote(ctx, env, body_type_val)?));
+
+            env.end_scope();
+            func_env.end_scope();
+
+            Ok(f)
+        },
         Value::EmptyTuple => Ok(Term::EmptyTuple),
         Value::Unit => Ok(Term::Unit),
         Value::Type => Ok(Term::Type),
@@ -116,18 +132,17 @@ mod tests {
     use super::{*, super::tests::*};
 
     pub fn assert_evaluates_to(s: SurfaceTerm, mut v: Value) {
-        let ctx = &mut Context::default();
-        let env = &mut Environment::default();
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
         let mut w = surface_evaluate_with_context(ctx, s).unwrap();
         assert!(def_equal(ctx, env, &mut v, &mut w).unwrap());
     }
 
     pub fn assert_evaluates_to_eq(s1: SurfaceTerm, s2: SurfaceTerm) {
-        let ctx = &mut Context::default();
-        let env = &mut Environment::default();
-        let senv = &mut SurfaceEnvironment::default();
-        let t1 = to_core(ctx, senv, s1).unwrap();
-        let t2 = to_core(ctx, senv, s2).unwrap();
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
+        let t1 = to_core(ctx, s1).unwrap();
+        let t2 = to_core(ctx, s2).unwrap();
         let mut v1 = evaluate(ctx, env, t1).unwrap();
         let mut v2 = evaluate(ctx, env, t2).unwrap();
         assert!(def_equal(ctx, env, &mut v1, &mut v2).unwrap());
@@ -140,12 +155,12 @@ mod tests {
 
     #[test]
     fn evaluate_unit() {
-        assert_evaluates_to(SurfaceTerm::Unit, Value::Unit)
+        assert_evaluates_to(SurfaceTerm::Generic("Unit".to_owned()), Value::Unit)
     }
 
     #[test]
     fn evaluate_type() {
-        assert_evaluates_to(SurfaceTerm::Type, Value::Type)
+        assert_evaluates_to(SurfaceTerm::Generic("Type".to_owned()), Value::Type)
     }
 
     #[test]
@@ -173,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_func_type_recursive() {
+    fn evaluate_binary_func_type() {
         assert_evaluates_to_eq(
             func_type(pattern::var("x"), UNIT, func_type(pattern::var("y"), UNIT, UNIT)), 
             func_type(pattern::var("x"), UNIT, func_type(pattern::var("x"), UNIT, UNIT)), 

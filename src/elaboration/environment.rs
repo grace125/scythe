@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use super::*;
 use std::hash::Hash;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Environment {
     depth: usize,
     bindings: HashMap<GenericTerm, (GenericValue, usize)>,
@@ -46,9 +46,6 @@ impl Environment {
             Value::Neutral(NeutralValue::Generic(g)) => {
                 self.insert_binding(x, g);
             },
-            Value::Neutral(NeutralValue::Call(_n, _v)) => {
-                todo!()
-            }
             v => {
                 let g = GenericValue::new();
                 self.insert_binding(x, g);
@@ -140,15 +137,43 @@ struct HistoryRow {
     substitutions: HashMap<GenericValue, Option<(Value, usize)>>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Context {
     depth: usize,
     types: HashMap<GenericTerm, (Value, usize)>,
     pub(crate) ids: HashMap<GenericTerm, String>, // TODO: should this be pub?
-    history: TypeHistory
+    history: TypeHistory,
+    global_environment: Environment,
+    pub(crate) surface_variables: HashMap<String, GenericTerm>,
+    pub(crate) keywords: HashSet<String> // TODO: add keywords
 }
 
 impl Context {
+    pub fn empty() -> Self {
+        let mut ctx = Self { 
+            depth: 0, 
+            types: Default::default(), 
+            ids: Default::default(), 
+            history: Default::default(), 
+            global_environment: Environment { 
+                depth: 0, 
+                bindings: Default::default(), 
+                unbindings: Default::default(), 
+                substitutions: Default::default(), 
+                history: Default::default()
+            }, 
+            surface_variables: Default::default(),
+            keywords: Default::default() 
+        };
+        ctx .bind("Unit", Value::Unit)
+            .bind("Type", Value::Type)
+            .add_keyword("Unit")
+            .add_keyword("Type")
+            .add_keyword("Void")
+            .add_keyword("Nat");
+        ctx
+    }
+
     pub fn get_type(&self, x: GenericTerm) -> Result<Value, ElaborationError> {
         self.types.get(&x).cloned().map(|(ty, _)| ty).ok_or(ElaborationError::TypeNotFound(x))
     }
@@ -169,6 +194,31 @@ impl Context {
             insert_or_remove(&mut self.types, x, opt_ty);
         }
         self.depth -= 1;
+    }
+
+    pub fn global_environment(&self) -> Environment {
+        self.global_environment.clone()
+    }
+
+    pub(crate) fn add_keyword(&mut self, kw: impl Into<String>) -> &mut Self {
+        self.keywords.insert(kw.into());
+        self
+    }
+
+    pub fn bind(&mut self, id: impl Into<String>, v: Value) -> &mut Self {
+        let x = GenericTerm::new();
+        let g = GenericValue::new();
+        self.surface_variables.insert(id.into(), x);
+        self.global_environment.insert_binding(x, g);
+        self.global_environment.insert_substitution(g, v);
+        self
+    }
+
+    pub fn bind_and_eval(&mut self, id: impl Into<String>, s: SurfaceTerm) -> &mut Self {
+        let Ok(t) = to_core(self, s) else { todo!() /* TODO: improve error */ };
+        let Ok(v) = evaluate(self, &mut self.global_environment(), t) else { todo!() /* TODO: improve error */};
+        
+        self.bind(id, v)
     }
 }
 
