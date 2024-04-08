@@ -36,9 +36,11 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
             evaluate_call(ctx, env, f_val, Box::new(x_val))
         },
         // Term::BinaryTuple(a, b) => Ok(Value::BinaryTuple(Box::new(env.evaluate(*a)?), Box::new(env.evaluate(*b)?))),
+        Term::NatNum(n) => Ok(Value::NatNum(n)),
         Term::EmptyTuple => Ok(Value::EmptyTuple),
         Term::Unit => Ok(Value::Unit),
-        Term::Type => Ok(Value::Type)
+        Term::Type => Ok(Value::Type),
+        Term::Nat => Ok(Value::Nat)
     }
 }
 
@@ -121,8 +123,12 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
             Ok(f)
         },
         Value::EmptyTuple => Ok(Term::EmptyTuple),
+        Value::NatNum(n) => Ok(Term::NatNum(n)),
+
         Value::Unit => Ok(Term::Unit),
         Value::Type => Ok(Term::Type),
+        Value::Nat => Ok(Term::Nat),
+        
     }
 }
 

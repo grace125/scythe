@@ -119,6 +119,8 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
             ))
 
         },
+        Term::NatNum(n1) => Ok((Term::NatNum(n1), Value::Nat)),
+        Term::Nat => Ok((Term::Nat, Value::Type)),
         Term::EmptyTuple => Ok((Term::EmptyTuple, Value::Unit)),
         Term::Unit => Ok((Term::Unit, Value::Type)),
         Term::Type => Ok((Term::Type, Value::Type)),

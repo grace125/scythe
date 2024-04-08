@@ -6,6 +6,7 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
     match (l, r) {
         (Value::Type, Value::Type) |
         (Value::Unit, Value::Unit) |
+        (Value::Nat, Value::Nat) |
         (Value::EmptyTuple, Value::EmptyTuple) => Ok(true),
         (Value::Func(env_l, patt_l, body_l), Value::Func(env_r, patt_r, body_r)) => {
             def_equal_func(ctx, env, env_l, patt_l, body_l, env_r, patt_r, body_r)
@@ -20,7 +21,10 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
         (Value::Neutral(n1), Value::Neutral(n2)) => {
             def_equal_neutral(ctx, env, n1, n2)
         },
-        (Value::Neutral(_), _) | 
+        (Value::NatNum(n1), Value::NatNum(n2)) => Ok(n1 == n2),
+        (Value::Neutral(_), _) |
+        (Value::NatNum(_), _) |
+        (Value::Nat, _) |
         (Value::EmptyTuple, _) | 
         (Value::Type, _) | 
         (Value::Unit, _) | 

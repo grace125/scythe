@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use num_bigint::BigUint;
+
 use crate::elaboration::{Pattern, Context, Term, generic::*};
 
 pub enum SurfacePattern {
@@ -10,9 +12,11 @@ pub enum SurfaceTerm {
     Generic(String), // TODO: switch to Cow<str>?
     Func(SurfacePattern, Box<SurfaceTerm>),
     Call(Box<SurfaceTerm>, Box<SurfaceTerm>),
-    EmptyTuple,
     FuncType(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
+    EmptyTuple,
+    NatNum(BigUint),
     Unit,
+    Nat,
     Type,
 }
 
@@ -89,7 +93,13 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
             let x = to_core_inner(ctx, senv, *x)?;
             Ok(Term::Call(Box::new(f), Box::new(x)))
         },
+        
+
         SurfaceTerm::EmptyTuple => Ok(Term::EmptyTuple),
+        SurfaceTerm::NatNum(n) => Ok(Term::NatNum(n)),
+        
+        SurfaceTerm::Nat => Ok(Term::Nat),
+        SurfaceTerm::Unit => Ok(Term::Unit),
         SurfaceTerm::FuncType(patt, arg_type, body_type) => {
             let arg_type = to_core_inner(ctx, senv, *arg_type)?;
             senv.start_scope();
@@ -98,7 +108,6 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
             senv.end_scope();
             Ok(Term::FuncType(patt, Box::new(arg_type), Box::new(body_type)))
         },
-        SurfaceTerm::Unit => Ok(Term::Unit),
         SurfaceTerm::Type => Ok(Term::Type),
     }
 }

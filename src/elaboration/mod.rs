@@ -7,6 +7,7 @@ mod pattern_matching;
 mod equality;
 
 pub use generic::*;
+use num_bigint::BigUint;
 pub use surface::*;
 pub use evaluation::*;
 pub use environment::*;
@@ -30,11 +31,13 @@ pub enum Pattern {
 #[derive(Clone, Debug)]
 pub enum Term {
     Generic(GenericTerm),
-    Func(Pattern, Box<Term>),
-    FuncType(Pattern, Box<Term>, Box<Term>),
     Call(Box<Term>, Box<Term>),
+    Func(Pattern, Box<Term>),
     EmptyTuple,
+    NatNum(BigUint),
+    FuncType(Pattern, Box<Term>, Box<Term>),
     Unit,
+    Nat,
     // BinaryTuple(Box<Term>, Box<Term>),
     Type,
 }
@@ -52,6 +55,8 @@ pub enum Value {
     FuncType(Environment, Pattern, Box<Value>, Box<Term>),
     EmptyTuple,
     // BinaryTuple(Box<Value>, Box<Value>),
+    NatNum(BigUint),
+    Nat,
     Unit,
     Type
 }
@@ -102,6 +107,7 @@ pub mod tests {
     pub const UNIT: SurfaceTerm = SurfaceTerm::Unit;
     pub const TYPE: SurfaceTerm = SurfaceTerm::Type;
     pub const EMPTY_TUPLE: SurfaceTerm = SurfaceTerm::EmptyTuple;
+    pub const NAT: SurfaceTerm = SurfaceTerm::Nat;
 
     pub mod pattern {
         use super::*;
@@ -117,6 +123,10 @@ pub mod tests {
 
     pub fn var(id: impl Into<String>) -> SurfaceTerm {
         SurfaceTerm::Generic(id.into())
+    }
+
+    pub fn nat(n: impl Into<BigUint>) -> SurfaceTerm {
+        SurfaceTerm::NatNum(n.into())
     }
 
     pub fn func(arg: SurfacePattern, body: SurfaceTerm) -> SurfaceTerm {
