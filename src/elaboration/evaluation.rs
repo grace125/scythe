@@ -16,6 +16,7 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
 
             Ok(Value::Func(env.clone_for_closure(), patt, body))
         },
+        Term::ExternalFunc(ext_func) => Ok(Value::ExternalFunc(ext_func)),
         Term::FuncType(patt, arg_type, body_type) => {
             let arg_type = Box::new(evaluate(ctx, env, *arg_type)?);
             let g = GenericValue::new();
@@ -56,6 +57,10 @@ fn evaluate_neutral_value(ctx: &mut Context, env: &mut Environment, neutral: Neu
             None => Ok(neutral.into()),
         },
         NeutralValue::Call(f, v) => evaluate_call(ctx, env, (*f).into(), v),
+        NeutralValue::ExternalCall(mut ext_call, n) => match evaluate_neutral_value(ctx, env, *n)? {
+            Value::Neutral(n) => Ok(Value::Neutral(NeutralValue::ExternalCall(ext_call, Box::new(n)))),
+            v => Ok((*ext_call.func)(v)?)
+        }
     }
 }
 
@@ -73,6 +78,14 @@ fn evaluate_call(ctx: &mut Context, _env: &mut Environment, f: Value, v: Box<Val
 
             Ok(y)
         },
+        Value::ExternalFunc(mut ext_func) => {
+            if let Value::Neutral(n) = *v {
+                Ok(Value::Neutral(NeutralValue::ExternalCall(Box::new(ext_func), Box::new(n))))
+            }
+            else {
+                Ok((*ext_func.func)(*v)?)
+            }
+        }
         // INVARIANT: type-checking will guarantee that this case never happens
         _ => unreachable!()
     }
@@ -85,6 +98,10 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
         Value::Neutral(NeutralValue::Call(n, v)) => Ok(Term::Call(
             Box::new(quote(ctx, env, (*n).into())?), 
             Box::new(quote(ctx, env, *v)?)
+        )),
+        Value::Neutral(NeutralValue::ExternalCall(ext_call, n)) => Ok(Term::Call(
+            Box::new(quote(ctx, env, Value::ExternalFunc(*ext_call))?), 
+            Box::new(quote(ctx, env, (*n).into())?)
         )),
         Value::Func(mut func_env, arg, body) => { // TODO: fix function quoting's exponential behaviour
             func_env.start_scope();
@@ -103,6 +120,7 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
 
             Ok(f)
         },
+        Value::ExternalFunc(ext_func) => Ok(Term::ExternalFunc(ext_func)),
         Value::FuncType(mut func_env, arg, arg_type, body_type) => {
             func_env.start_scope();
             env.start_scope();

@@ -21,7 +21,9 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
         (Value::Neutral(n1), Value::Neutral(n2)) => {
             def_equal_neutral(ctx, env, n1, n2)
         },
+        (Value::ExternalFunc(ext_fn), Value::ExternalFunc(ext_fn_2)) => Ok(ext_fn == ext_fn_2),
         (Value::NatNum(n1), Value::NatNum(n2)) => Ok(n1 == n2),
+        (Value::ExternalFunc(_), _) |
         (Value::Neutral(_), _) |
         (Value::NatNum(_), _) |
         (Value::Nat, _) |
@@ -57,7 +59,9 @@ fn def_equal_neutral(ctx: &mut Context, env: &mut Environment, n1: &mut NeutralV
     match (n1, n2) {
         (NeutralValue::Generic(g1), NeutralValue::Generic(g2)) => Ok(g1 == g2),
         (NeutralValue::Call(n1, v1), NeutralValue::Call(n2, v2)) => Ok(def_equal_neutral(ctx, env, n1, n2)? && def_equal(ctx, env, v1, v2)?),
+        (NeutralValue::ExternalCall(ext_fn1, n1), NeutralValue::ExternalCall(ext_fn2, n2)) => Ok(ext_fn1 == ext_fn2 && def_equal_neutral(ctx, env, n1, n2)?),
+        (NeutralValue::ExternalCall(..), _) |
         (NeutralValue::Generic(_), _) |
-        (NeutralValue::Call(_, _), _) => Ok(false),
+        (NeutralValue::Call(..), _) => Ok(false),
     }
 }

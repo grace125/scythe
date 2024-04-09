@@ -49,6 +49,15 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
         Term::Generic(x) => {
             Ok((x.into(), ctx.get_type(x)?))
         },
+        Term::ExternalFunc(ext_func) => {
+            let ty = Value::FuncType(
+                env.clone_for_closure(), 
+                ext_func.pattern.clone(), 
+                ext_func.arg_type.clone(), 
+                ext_func.body_type.clone()
+            );
+            Ok((Term::ExternalFunc(ext_func), ty))
+        }
         Term::Func(arg, body) => {
             env.start_scope();
 

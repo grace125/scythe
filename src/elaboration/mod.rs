@@ -5,6 +5,7 @@ mod evaluation;
 mod type_checking;
 mod pattern_matching;
 mod equality;
+mod external_function;
 
 pub use generic::*;
 use num_bigint::BigUint;
@@ -14,6 +15,8 @@ pub use environment::*;
 pub use type_checking::*;
 pub(crate) use pattern_matching::*;
 pub use equality::*;
+
+use self::external_function::ExternalFunction;
 
 
 // XXX: type-check before evaluation
@@ -33,6 +36,7 @@ pub enum Term {
     Generic(GenericTerm),
     Call(Box<Term>, Box<Term>),
     Func(Pattern, Box<Term>),
+    ExternalFunc(ExternalFunction),
     EmptyTuple,
     NatNum(BigUint),
     FuncType(Pattern, Box<Term>, Box<Term>),
@@ -52,6 +56,7 @@ impl From<GenericTerm> for Term {
 pub enum Value {
     Neutral(NeutralValue),
     Func(Environment, Pattern, Box<Term>),
+    ExternalFunc(ExternalFunction),
     FuncType(Environment, Pattern, Box<Value>, Box<Term>),
     EmptyTuple,
     // BinaryTuple(Box<Value>, Box<Value>),
@@ -59,6 +64,15 @@ pub enum Value {
     Nat,
     Unit,
     Type
+}
+
+impl Value {
+    pub fn is_neutral(&self) -> bool {
+        match self {
+            Value::Neutral(_) => true,
+            _ => false
+        }
+    }
 }
 
 impl From<GenericValue> for Value {
@@ -76,7 +90,8 @@ impl From<NeutralValue> for Value {
 #[derive(Clone, Debug)]
 pub enum NeutralValue {
     Generic(GenericValue),
-    Call(Box<NeutralValue>, Box<Value>)
+    Call(Box<NeutralValue>, Box<Value>),
+    ExternalCall(Box<ExternalFunction>, Box<NeutralValue>)
 }
 
 impl From<GenericValue> for NeutralValue {
