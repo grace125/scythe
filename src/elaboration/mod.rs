@@ -26,6 +26,7 @@ use self::external_function::ExternalFunction;
 
 #[derive(Clone, Debug)]
 pub enum Pattern {
+    Ignore,
     Generic(GenericTerm),
     Annotation(Box<Pattern>, Box<Term>)
 }
@@ -34,15 +35,22 @@ pub enum Pattern {
 #[derive(Clone, Debug)]
 pub enum Term {
     Generic(GenericTerm),
+
     Call(Box<Term>, Box<Term>),
+    // First(Box<Term>),
+    // Second(Box<Term>),
+
     Func(Pattern, Box<Term>),
     ExternalFunc(ExternalFunction),
+    BinaryTuple(Box<Term>, Box<Term>),
     EmptyTuple,
     NatNum(BigUint),
+
     FuncType(Pattern, Box<Term>, Box<Term>),
+    BinaryTupleType(Pattern, Box<Term>, Box<Term>),
     Unit,
     Nat,
-    // BinaryTuple(Box<Term>, Box<Term>),
+    
     Type,
 }
 
@@ -55,14 +63,18 @@ impl From<GenericTerm> for Term {
 #[derive(Clone, Debug)]
 pub enum Value {
     Neutral(NeutralValue),
-    Func(Environment, Pattern, Box<Term>),
+
+    Func(Environment, Pattern, Box<Term>), 
     ExternalFunc(ExternalFunction),
-    FuncType(Environment, Pattern, Box<Value>, Box<Term>),
-    EmptyTuple,
-    // BinaryTuple(Box<Value>, Box<Value>),
+    BinaryTuple(Box<Value>, Box<Value>),
+    EmptyTuple, 
     NatNum(BigUint),
-    Nat,
+    
+    FuncType(Environment, Pattern, Box<Value>, Box<Term>),
+    BinaryTupleType(Pattern, Box<Value>, Box<Term>),
     Unit,
+    Nat,
+    
     Type
 }
 
@@ -127,6 +139,8 @@ pub mod tests {
     pub mod pattern {
         use super::*;
 
+        pub const IGNORE: SurfacePattern = SurfacePattern::Ignore;
+
         pub fn var(id: impl Into<String>) -> SurfacePattern {
             SurfacePattern::Generic(id.into())
         }
@@ -150,6 +164,14 @@ pub mod tests {
 
     pub fn func_type(p: SurfacePattern, arg_type: SurfaceTerm, arg_body: SurfaceTerm) -> SurfaceTerm {
         SurfaceTerm::FuncType(p, Box::new(arg_type), Box::new(arg_body))
+    }
+
+    pub fn tuple(l: SurfaceTerm, r: SurfaceTerm) -> SurfaceTerm {
+        SurfaceTerm::BinaryTuple(Box::new(l), Box::new(r))
+    }
+
+    pub fn tuple_type(patt: SurfacePattern, l_type: SurfaceTerm, r_type: SurfaceTerm) -> SurfaceTerm {
+        SurfaceTerm::BinaryTupleType(patt, Box::new(l_type), Box::new(r_type))
     }
 
     pub fn call(f: SurfaceTerm, x: SurfaceTerm) -> SurfaceTerm {

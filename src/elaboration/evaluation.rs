@@ -36,7 +36,21 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
             let x_val = evaluate(ctx, env, *x)?;
             evaluate_call(ctx, env, f_val, Box::new(x_val))
         },
-        // Term::BinaryTuple(a, b) => Ok(Value::BinaryTuple(Box::new(env.evaluate(*a)?), Box::new(env.evaluate(*b)?))),
+        Term::BinaryTuple(l, r) => Ok(Value::BinaryTuple(Box::new(evaluate(ctx, env, *l)?), Box::new(evaluate(ctx, env, *r)?))),
+        Term::BinaryTupleType(patt, l_type, r_type) => {
+            let l_type = Box::new(evaluate(ctx, env, *l_type)?);
+            let g = GenericValue::new();
+
+            env.start_scope();
+
+            bind(ctx, env, &patt, g.into())?;
+            let r_type_eval = evaluate(ctx, env, *r_type)?;
+            let r_type = Box::new(quote(ctx, env, r_type_eval)?);
+
+            env.end_scope();
+
+            Ok(Value::BinaryTupleType(patt, l_type, r_type))
+        }
         Term::NatNum(n) => Ok(Value::NatNum(n)),
         Term::EmptyTuple => Ok(Value::EmptyTuple),
         Term::Unit => Ok(Value::Unit),
@@ -121,13 +135,20 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
             Ok(f)
         },
         Value::ExternalFunc(ext_func) => Ok(Term::ExternalFunc(ext_func)),
+        Value::BinaryTuple(l, r) => Ok(Term::BinaryTuple(
+            Box::new(quote(ctx, env, *l)?), 
+            Box::new(quote(ctx, env, *r)?)
+        )),
+        Value::EmptyTuple => Ok(Term::EmptyTuple),
+        Value::NatNum(n) => Ok(Term::NatNum(n)),
+
         Value::FuncType(mut func_env, arg, arg_type, body_type) => {
+            let g = GenericValue::new();
+
             func_env.start_scope();
             env.start_scope();
 
             let arg_type_term = Box::new(quote(ctx, env, *arg_type)?);
-
-            let g = GenericValue::new();
 
             bind(ctx, &mut func_env, &arg, g.into())?;
             bind(ctx, env, &arg, g.into())?;
@@ -140,19 +161,17 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
 
             Ok(f)
         },
-        Value::EmptyTuple => Ok(Term::EmptyTuple),
-        Value::NatNum(n) => Ok(Term::NatNum(n)),
-
+        Value::BinaryTupleType(patt, l_type, r_type) => Ok(Term::BinaryTupleType(patt, Box::new(quote(ctx, env, *l_type)?), r_type)),
         Value::Unit => Ok(Term::Unit),
-        Value::Type => Ok(Term::Type),
         Value::Nat => Ok(Term::Nat),
-        
+    
+        Value::Type => Ok(Term::Type),
     }
 }
 
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::{*, super::tests::*};
 
     pub fn assert_evaluates_to(s: SurfaceTerm, mut v: Value) {
@@ -169,7 +188,9 @@ mod tests {
         let t2 = to_core(ctx, s2).unwrap();
         let mut v1 = evaluate(ctx, env, t1).unwrap();
         let mut v2 = evaluate(ctx, env, t2).unwrap();
-        assert!(def_equal(ctx, env, &mut v1, &mut v2).unwrap());
+        let res = def_equal(ctx, env, &mut v1, &mut v2);
+        println!("{:?}", res);
+        assert!(res.unwrap());
     }
 
     #[test]
@@ -249,5 +270,22 @@ mod tests {
             func(pattern::var("f1"), call(var("f1"), EMPTY_TUPLE)), 
             func(pattern::var("f2"), call(var("f2"), EMPTY_TUPLE)), 
         );
+    }
+
+
+    #[test]
+    fn evaluate_tuple() {
+        assert_evaluates_to_eq(
+            tuple(EMPTY_TUPLE, call(func(pattern::var("x"), var("x")), nat(3u32))), 
+            tuple(call(func(pattern::var("x"), EMPTY_TUPLE), EMPTY_TUPLE), nat(3u32))
+        )
+    }
+
+    #[test]
+    fn evaluate_tuple_type() {
+        assert_evaluates_to_eq(
+            tuple_type(pattern::IGNORE, UNIT, UNIT), 
+            tuple_type(pattern::var("x"), UNIT, UNIT), 
+        )
     }
 }

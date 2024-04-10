@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -> Result<Term, ElaborationError> {
     println!("CHECK {:?}", t);
     println!("CHECK TYPE {:?}", ty);
@@ -12,7 +11,7 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
         Term::Func(patt, body) => {
             let g = GenericValue::new();
             let Value::FuncType(mut term_env, func_patt, func_arg_type, body_type) = ty else {
-                todo!() // Improve error
+                todo!() // TODO: Improve error
             };
 
             term_env.start_scope();
@@ -31,7 +30,34 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
 
             Ok(Term::Func(patt, Box::new(body)))
         },
-        _ => {
+        Term::BinaryTuple(l, r) => { // TODO: test me
+            let g = GenericValue::new();
+            let Value::BinaryTupleType(patt, l_type, r_type) = ty else {
+                todo!() // TODO: improve error
+            };
+
+            let l = Box::new(check(ctx, env, *l, *l_type.clone())?);
+
+            env.start_scope();
+
+            check_and_bind(ctx, env, patt, g.into(), *l_type)?;
+            let r_type = evaluate(ctx, env, *r_type)?;
+
+            let r = Box::new(check(ctx, env, *r, r_type)?);
+
+            env.end_scope();
+
+            Ok(Term::BinaryTuple(l, r))
+        }
+        Term::Nat |
+        Term::Unit |
+        Term::Type |
+        Term::NatNum(_) |
+        Term::Call(..) |
+        Term::EmptyTuple |
+        Term::FuncType(..) |
+        Term::ExternalFunc(_) |
+        Term::BinaryTupleType(..) => {
             let (t_prime, mut ty_prime) = infer(ctx, env, t)?;
             if def_equal(ctx, env, &mut ty, &mut ty_prime)? {
                 Ok(t_prime)
@@ -57,10 +83,11 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
                 ext_func.body_type.clone()
             );
             Ok((Term::ExternalFunc(ext_func), ty))
-        }
+        },
         Term::Func(arg, body) => {
             env.start_scope();
 
+            // TODO: add custom error message if pattern can't be inferred
             let (arg, arg_type) = infer_pattern(ctx, env, arg)?;
 
             let g = GenericValue::new().into();
@@ -77,24 +104,6 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
                 Term::Func(arg.clone(), Box::new(body)), 
                 Value::FuncType(env.clone_for_closure(), arg, Box::new(arg_type), Box::new(body_type))
             ))
-        },
-        Term::FuncType(type_patt, arg_type, body_type) => {
-            let g = GenericValue::new();
-
-            env.start_scope();
-            ctx.start_scope();
-            
-            let arg_type = check(ctx, env, *arg_type, Value::Type)?;
-            let arg_type_value = evaluate(ctx, env, arg_type.clone())?;
-
-            check_and_bind(ctx, env, type_patt.clone(), g.into(), arg_type_value)?;
-            let body_type = check(ctx, env, *body_type, Value::Type)?;
-            let pi = Term::FuncType(type_patt, Box::new(arg_type), Box::new(body_type));
-
-            ctx.end_scope();
-            env.end_scope();
-
-            Ok((pi, Value::Type))
         },
         Term::Call(f, x) => {
             env.start_scope(); // TODO: is this necessary?
@@ -126,13 +135,61 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
                 Term::Call(Box::new(f), Box::new(x)),
                 ft_body_type
             ))
+        },
+        Term::FuncType(type_patt, arg_type, body_type) => {
+            let g = GenericValue::new();
 
+            env.start_scope();
+            ctx.start_scope();
+
+            // TODO: simplify
+            
+            let arg_type = check(ctx, env, *arg_type, Value::Type)?;
+            let arg_type_value = evaluate(ctx, env, arg_type.clone())?;
+
+            check_and_bind(ctx, env, type_patt.clone(), g.into(), arg_type_value)?;
+            let body_type = check(ctx, env, *body_type, Value::Type)?;
+            let pi = Term::FuncType(type_patt, Box::new(arg_type), Box::new(body_type));
+
+            ctx.end_scope();
+            env.end_scope();
+
+            Ok((pi, Value::Type))
+        },
+        Term::BinaryTupleType(patt, l_type, r_type) => {
+            let g = GenericValue::new();
+
+            let l_type = check(ctx, env, *l_type, Value::Type)?;
+            let l_type_value = evaluate(ctx, env, l_type.clone())?;
+            
+            env.start_scope();
+
+            check_and_bind(ctx, env, patt.clone(), g.into(), l_type_value)?;
+            let r_type = check(ctx, env, *r_type, Value::Type)?;
+            let sigma = Term::BinaryTupleType(patt, Box::new(l_type), Box::new(r_type));
+
+            env.end_scope();
+
+            Ok((sigma, Value::Type))
+        },
+        Term::BinaryTuple(l, r) => {
+
+            let (l, l_type) = infer(ctx, env, *l)?;
+            let (r, r_type) = infer(ctx, env, *r)?;
+            let r_type = quote(ctx, env, r_type)?;
+
+            Ok((
+                Term::BinaryTuple(Box::new(l), Box::new(r)),
+                Value::BinaryTupleType(Pattern::Ignore, Box::new(l_type), Box::new(r_type))
+            ))
         },
         Term::NatNum(n1) => Ok((Term::NatNum(n1), Value::Nat)),
-        Term::Nat => Ok((Term::Nat, Value::Type)),
         Term::EmptyTuple => Ok((Term::EmptyTuple, Value::Unit)),
-        Term::Unit => Ok((Term::Unit, Value::Type)),
-        Term::Type => Ok((Term::Type, Value::Type)),
+        ty @ (
+            Term::Unit |
+            Term::Nat |
+            Term::Type
+        ) => Ok((ty, Value::Type)),
     } 
 }
 
@@ -212,5 +269,18 @@ pub mod tests {
         let (_, mut ty) = surface_infer_with_context(ctx, EMPTY_TUPLE).unwrap();
 
         assert!(def_equal(ctx, env, &mut ty, &mut Value::Unit).unwrap())
+    }
+
+    #[test]
+    fn infer_tuple() {
+        let ctx = &mut Context::empty();
+        let env = &mut ctx.global_environment();
+
+        let (_, mut ty) = surface_infer_with_context(ctx, tuple(EMPTY_TUPLE, nat(0u32))).unwrap();
+
+        let ty2 = to_core(ctx, tuple_type(pattern::IGNORE, UNIT, NAT)).unwrap();
+        let mut ty2 = evaluate(ctx, env, ty2).unwrap();
+
+        assert!(def_equal(ctx, env, &mut ty, &mut ty2).unwrap());
     }
 }

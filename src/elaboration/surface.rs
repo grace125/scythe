@@ -4,6 +4,7 @@ use num_bigint::BigUint;
 use crate::elaboration::{Pattern, Context, Term, generic::*};
 
 pub enum SurfacePattern {
+    Ignore,
     Generic(String),
     Annotation(Box<SurfacePattern>, Box<SurfaceTerm>)
 }
@@ -13,6 +14,8 @@ pub enum SurfaceTerm {
     Func(SurfacePattern, Box<SurfaceTerm>),
     Call(Box<SurfaceTerm>, Box<SurfaceTerm>),
     FuncType(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
+    BinaryTuple(Box<SurfaceTerm>, Box<SurfaceTerm>),
+    BinaryTupleType(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
     EmptyTuple,
     NatNum(BigUint),
     Unit,
@@ -94,26 +97,38 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
             Ok(Term::Call(Box::new(f), Box::new(x)))
         },
         
-
+        SurfaceTerm::BinaryTuple(l, r) => Ok(Term::BinaryTuple(
+            Box::new(to_core_inner(ctx, senv, *l)?), 
+            Box::new(to_core_inner(ctx, senv, *r)?)
+        )),
         SurfaceTerm::EmptyTuple => Ok(Term::EmptyTuple),
         SurfaceTerm::NatNum(n) => Ok(Term::NatNum(n)),
         
         SurfaceTerm::Nat => Ok(Term::Nat),
         SurfaceTerm::Unit => Ok(Term::Unit),
         SurfaceTerm::FuncType(patt, arg_type, body_type) => {
-            let arg_type = to_core_inner(ctx, senv, *arg_type)?;
+            let arg_type = Box::new(to_core_inner(ctx, senv, *arg_type)?);
             senv.start_scope();
             let patt = surface_bind_pattern(ctx, senv, patt)?;
-            let body_type = to_core_inner(ctx, senv, *body_type)?;
+            let body_type = Box::new(to_core_inner(ctx, senv, *body_type)?);
             senv.end_scope();
-            Ok(Term::FuncType(patt, Box::new(arg_type), Box::new(body_type)))
+            Ok(Term::FuncType(patt, arg_type, body_type))
         },
+        SurfaceTerm::BinaryTupleType(patt, l_type, r_type) => {
+            let l_type = Box::new(to_core_inner(ctx, senv, *l_type)?);
+            senv.start_scope();
+            let patt = surface_bind_pattern(ctx, senv, patt)?;
+            let r_type = Box::new(to_core_inner(ctx, senv, *r_type)?);
+            senv.end_scope();
+            Ok(Term::BinaryTupleType(patt, l_type, r_type))
+        }
         SurfaceTerm::Type => Ok(Term::Type),
     }
 }
 
 fn surface_bind_pattern(ctx: &mut Context, senv: &mut SurfaceEnvironment, patt: SurfacePattern) -> Result<Pattern, IdentifierError> {
     match patt {
+        SurfacePattern::Ignore => Ok(Pattern::Ignore),
         SurfacePattern::Generic(id) => {
             if ctx.keywords.contains(&id) {
                 Err(IdentifierError::KeywordInPattern(id))

@@ -6,6 +6,7 @@ use super::*;
 
 pub(crate) fn check_and_bind(ctx: &mut Context, env: &mut Environment, p: Pattern, v: Value, mut v_type: Value) -> Result<(), ElaborationError> {
     match p {
+        Pattern::Ignore => Ok(()),
         Pattern::Annotation(p_inner, asserted_type) => {
             let asserted_type = check(ctx, env, *asserted_type, Value::Type)?;
             let mut asserted_type = evaluate(ctx, env, asserted_type)?;
@@ -38,6 +39,7 @@ pub(crate) fn check_pattern(ctx: &mut Context, env: &mut Environment, p: Pattern
 
 pub(crate) fn bind(ctx: &mut Context, env: &mut Environment, p: &Pattern, v: Value) -> Result<(), ElaborationError> {
     match p {
+        Pattern::Ignore => Ok(()),
         Pattern::Annotation(p_inner, _) => bind(ctx, env, p_inner, v),
         Pattern::Generic(x) => Ok({
             env.insert(*x, v); 
@@ -48,6 +50,7 @@ pub(crate) fn bind(ctx: &mut Context, env: &mut Environment, p: &Pattern, v: Val
 pub(crate) fn infer_pattern(ctx: &mut Context, env: &mut Environment, p: Pattern) -> Result<(Pattern, Value), ElaborationError> {
     println!("INFER PATTERN {:?}", p);
     match p {
+        Pattern::Ignore => panic!("Can't infer type of _"), // TODO: replace with proper error
         Pattern::Generic(x) => panic!("Can't infer type of {:?}", x), // TODO: replace with proper error
         Pattern::Annotation(p_inner, p_type) => {
             let p_type = check(ctx, env, *p_type, Value::Type)?;
