@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use num_bigint::BigUint;
+use thiserror::Error;
 
 use crate::elaboration::{Pattern, Context, Term, generic::*};
 
 pub enum SurfacePattern {
     Ignore,
+    EmptyTuple,
     Generic(String),
     Annotation(Box<SurfacePattern>, Box<SurfaceTerm>)
 }
@@ -18,8 +20,10 @@ pub enum SurfaceTerm {
     BinaryTupleType(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
     EmptyTuple,
     NatNum(BigUint),
+    StrLiteral(String),
     Unit,
     Nat,
+    Str,
     Type,
 }
 
@@ -78,7 +82,6 @@ pub fn to_core(ctx: &mut Context, surface: SurfaceTerm) -> Result<Term, Identifi
 }
 
 fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: SurfaceTerm) -> Result<Term, IdentifierError> {
-    
     match surface {
         SurfaceTerm::Generic(id) => {
             let generic_term = senv.get_variable(id)?;
@@ -103,9 +106,11 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
         )),
         SurfaceTerm::EmptyTuple => Ok(Term::EmptyTuple),
         SurfaceTerm::NatNum(n) => Ok(Term::NatNum(n)),
+        SurfaceTerm::StrLiteral(s) => Ok(Term::StrLiteral(s)),
         
         SurfaceTerm::Nat => Ok(Term::Nat),
         SurfaceTerm::Unit => Ok(Term::Unit),
+        SurfaceTerm::Str => Ok(Term::Str),
         SurfaceTerm::FuncType(patt, arg_type, body_type) => {
             let arg_type = Box::new(to_core_inner(ctx, senv, *arg_type)?);
             senv.start_scope();
@@ -129,6 +134,7 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
 fn surface_bind_pattern(ctx: &mut Context, senv: &mut SurfaceEnvironment, patt: SurfacePattern) -> Result<Pattern, IdentifierError> {
     match patt {
         SurfacePattern::Ignore => Ok(Pattern::Ignore),
+        SurfacePattern::EmptyTuple => Ok(Pattern::EmptyTuple),
         SurfacePattern::Generic(id) => {
             if ctx.keywords.contains(&id) {
                 Err(IdentifierError::KeywordInPattern(id))
@@ -145,9 +151,11 @@ fn surface_bind_pattern(ctx: &mut Context, senv: &mut SurfaceEnvironment, patt: 
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Error)]
 pub enum IdentifierError {
+    #[error("Identifier {0} not found")]
     IdentifierNotFound(String),
+    #[error("Keyword {0} used in pattern")]
     KeywordInPattern(String)
 }
 

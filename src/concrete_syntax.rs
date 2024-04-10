@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use super::lexing::{OpKind, LexingError};
+use thiserror::Error;
 pub use OpKind::*;
 
 const TEMPLATE_PRECEDENCE: u32          = 0;
@@ -120,9 +121,9 @@ pub enum TemplateOutput {
 
 #[derive(Clone, PartialEq)]
 pub struct Op {
-    kind: OpKind,
-    has_left: bool,
-    children: VecDeque<CST>
+    pub(crate) kind: OpKind,
+    pub(crate) has_left: bool,
+    pub(crate) children: VecDeque<CST>
 }
 
 impl Op {
@@ -381,9 +382,9 @@ impl TryInto<CST> for Op {
             (OpKind::Let, 2) |
             (OpKind::Match, 2) |
             (OpKind::MatchArm, 2) |
-            (OpKind::Brace, 1) | 
-            (OpKind::Bracket, 1) | 
-            (OpKind::Parenthesis, 1)                => Ok(CST::Op(self)),
+            (OpKind::Brace, 0 | 1) | 
+            (OpKind::Bracket, 0 | 1) | 
+            (OpKind::Parenthesis, 0 | 1)                => Ok(CST::Op(self)),
             (OpKind::If, _) |
             (OpKind::Add, _) |
             (OpKind::Sub, _) |
@@ -417,6 +418,7 @@ pub enum CST {
     Op(Op),
     Nat(u64),
     Float(f64),
+    Str(String),
     Id(String),
 }
 
@@ -441,6 +443,7 @@ impl std::fmt::Debug for CST {
             Self::Nat(n) => f.write_fmt(format_args!("Nat({})", n)),
             Self::Float(fl) => f.write_fmt(format_args!("Float({})", fl)),
             Self::Id(id) => f.write_fmt(format_args!("`{}`", id)),
+            Self::Str(s) => f.write_fmt(format_args!("\"{}\"", s)),
         }
     }
 }
@@ -527,23 +530,26 @@ where L: Iterator<Item = Result<CST, LexingError>>
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum ParseError {
+    #[error("Lexing error: `{0}`")]
+    LexingError(#[from] LexingError),
+    #[error("Operator conflict")]
     OperatorConflict,
-    LexingError(LexingError),
+    #[error("Empty file")]
     EmptyFile,
+    #[error("Item expected")]
     ItemExpected,
+    #[error("Invalid arity")]
     InvalidArity,
+    #[error("Invalid empty slot")]
     InvalidEmptySlot(String),
+    #[error("Invalid template")]
     InvalidTemplate(String),
+    #[error("Unused template")]
     UnusedTemplate(OpKind),
+    #[error("Incomplete operator")]
     IncompleteOperator(Op)
-}
-
-impl From<LexingError> for ParseError {
-    fn from(value: LexingError) -> Self {
-        ParseError::LexingError(value)
-    }
 }
 
 #[cfg(test)]
@@ -554,6 +560,12 @@ mod tests {
 
     mod helpers {
         use super::*;
+
+        pub const EMPTY_PARENS: Op = Op {
+            kind: OpKind::Parenthesis,
+            has_left: false,
+            children: VecDeque::new(),
+        };
 
         pub fn parse_str(s: &str) -> Result<Option<CST>, ParseError> {
             parse(&mut lex(s))
@@ -913,6 +925,14 @@ mod tests {
             assert_eq!(
                 parse_str("[(c + d)]"),
                 root(bracket(parenthesis(add(id("c"), id("d")))))
+            )
+        }
+
+        #[test]
+        fn empty_parens() {
+            assert_eq!(
+                parse_str("()"),
+                root(EMPTY_PARENS.try_into().unwrap())
             )
         }
     }

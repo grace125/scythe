@@ -1,4 +1,7 @@
+use std::{io::Repeat, mem::replace};
+
 use logos::{Logos, Lexer};
+use thiserror::Error;
 use crate::concrete_syntax::{Op, CST};
 
 #[derive(Default)]
@@ -29,7 +32,7 @@ pub struct SyntaxInfo;
 #[logos(extras = TokenExtras)]
 #[logos(skip r"[ \t\n\f]+")]
 enum Token {
-    // #[regex("\"\"")]
+    #[regex("\"(\\\\.|[^\"\\\\])*\"",                                            str_callback,   priority = 1)]
     #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                                          id_callback,    priority = 1)]
     #[regex(r"[0-9]+",                                                          nat_callback,   priority = 2)] 
     #[regex(r"[0-9]+\.[0-9]*",                                                  float_callback, priority = 2)]
@@ -63,6 +66,19 @@ fn float_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingErro
         .parse()
         .map(|f| (get_info_for_literals(lex), CST::Float(f)))
         .or_else(|_e| Err(LexingError::InvalidFloatLiteral))
+}
+
+fn str_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingError> {
+    let info = get_info_for_literals(lex);
+    let s = lex .slice();
+    let s = s[1..s.len()-1]
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\'", "'")
+        .replace(r"\\", r"\");
+
+    Ok((info, CST::Str(s)))
 }
 
 fn op_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
@@ -101,12 +117,15 @@ fn op_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
     (info, CST::Op(Op::new(kind)))
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Error)]
 pub enum LexingError {
+    #[error("Invalid Nat literal")]
     InvalidNatLiteral,
+    #[error("Invalid Float literal")]
     InvalidFloatLiteral,
 
     #[default]
+    #[error("Non-Ascii character")]
     NonAsciiCharacter,
 }
 

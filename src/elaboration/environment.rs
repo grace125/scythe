@@ -167,6 +167,7 @@ impl Context {
         };
         ctx .bind("Unit", Value::Unit)
             .bind("Type", Value::Type)
+            .bind("Nat", Value::Nat)
             .add_keyword("Unit")
             .add_keyword("Type")
             .add_keyword("Void")

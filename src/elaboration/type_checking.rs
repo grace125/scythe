@@ -1,8 +1,6 @@
 use super::*;
 
 pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -> Result<Term, ElaborationError> {
-    println!("CHECK {:?}", t);
-    println!("CHECK TYPE {:?}", ty);
     match t {
         Term::Generic(x) => {
             ctx.insert_type(x, ty);
@@ -50,9 +48,11 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
             Ok(Term::BinaryTuple(l, r))
         }
         Term::Nat |
+        Term::Str |
         Term::Unit |
         Term::Type |
         Term::NatNum(_) |
+        Term::StrLiteral(_) |
         Term::Call(..) |
         Term::EmptyTuple |
         Term::FuncType(..) |
@@ -70,7 +70,6 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
 }
 
 pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term, Value), ElaborationError> {
-    println!("INFER {:?}", t);
     match t {
         Term::Generic(x) => {
             Ok((x.into(), ctx.get_type(x)?))
@@ -183,11 +182,13 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
                 Value::BinaryTupleType(Pattern::Ignore, Box::new(l_type), Box::new(r_type))
             ))
         },
-        Term::NatNum(n1) => Ok((Term::NatNum(n1), Value::Nat)),
+        Term::NatNum(n) => Ok((Term::NatNum(n), Value::Nat)),
+        Term::StrLiteral(s) => Ok((Term::StrLiteral(s), Value::Str)),
         Term::EmptyTuple => Ok((Term::EmptyTuple, Value::Unit)),
         ty @ (
             Term::Unit |
             Term::Nat |
+            Term::Str |
             Term::Type
         ) => Ok((ty, Value::Type)),
     } 

@@ -7,6 +7,7 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
         (Value::Type, Value::Type) |
         (Value::Unit, Value::Unit) |
         (Value::Nat, Value::Nat) |
+        (Value::Str, Value::Str) |
         (Value::EmptyTuple, Value::EmptyTuple) => Ok(true),
 
         (Value::Func(e1, p1, b1), Value::Func(e2, p2, b2)) => def_equal_func(ctx, env, e1, p1, b1, e2, p2, b2),
@@ -46,13 +47,16 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
         },
         (Value::ExternalFunc(ext_fn), Value::ExternalFunc(ext_fn_2)) => Ok(ext_fn == ext_fn_2),
         (Value::NatNum(n1), Value::NatNum(n2)) => Ok(n1 == n2),
+        (Value::StrLiteral(s1), Value::StrLiteral(s2)) => Ok(s1 == s2),
 
         (Value::BinaryTuple(..), _) |
         (Value::BinaryTupleType(..), _) |
         (Value::ExternalFunc(_), _) |
         (Value::Neutral(_), _) |
         (Value::NatNum(_), _) |
+        (Value::StrLiteral(_), _) |
         (Value::Nat, _) |
+        (Value::Str, _) |
         (Value::EmptyTuple, _) | 
         (Value::Type, _) | 
         (Value::Unit, _) | 

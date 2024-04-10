@@ -12,6 +12,7 @@ use num_bigint::BigUint;
 pub use surface::*;
 pub use evaluation::*;
 pub use environment::*;
+use thiserror::Error;
 pub use type_checking::*;
 pub(crate) use pattern_matching::*;
 pub use equality::*;
@@ -27,6 +28,7 @@ use self::external_function::ExternalFunction;
 #[derive(Clone, Debug)]
 pub enum Pattern {
     Ignore,
+    EmptyTuple,
     Generic(GenericTerm),
     Annotation(Box<Pattern>, Box<Term>)
 }
@@ -45,11 +47,13 @@ pub enum Term {
     BinaryTuple(Box<Term>, Box<Term>),
     EmptyTuple,
     NatNum(BigUint),
+    StrLiteral(String),
 
     FuncType(Pattern, Box<Term>, Box<Term>),
     BinaryTupleType(Pattern, Box<Term>, Box<Term>),
     Unit,
     Nat,
+    Str,
     
     Type,
 }
@@ -69,11 +73,13 @@ pub enum Value {
     BinaryTuple(Box<Value>, Box<Value>),
     EmptyTuple, 
     NatNum(BigUint),
+    StrLiteral(String),
     
     FuncType(Environment, Pattern, Box<Value>, Box<Term>),
     BinaryTupleType(Pattern, Box<Value>, Box<Term>),
     Unit,
     Nat,
+    Str,
     
     Type
 }
@@ -112,15 +118,22 @@ impl From<GenericValue> for NeutralValue {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Error)]
 pub enum ElaborationError {
+    #[error("Identifier {0} not found")]
     IdentifierNotFound(String),
+    #[error("Binding {0:?} not found")]
     BindingNotFound(GenericTerm),
+    #[error("Unbinding {0:?} not found")]
     UnbindingNotFound(GenericValue),
+    #[error("Type {0:?} not found")]
     TypeNotFound(GenericTerm),
+    #[error("Invalid call")]
     InvalidCall(Value),
+    #[error("Can't find type of {0:?}")]
     CannotFindTypeOf(GenericTerm),
-    ExpectedTypeFoundType(Pattern, Value, Value)
+    #[error("Error binding to {0:?}: expected type {1:?}, found {2:?}")]
+    ExpectedTypeFoundType(Pattern, Value, Value),
 }
 
 #[cfg(test)]

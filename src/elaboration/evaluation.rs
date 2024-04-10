@@ -1,7 +1,6 @@
 use super::*;
 
 pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<Value, ElaborationError> {
-    println!("EVALUATE: {:?}\n", term);
     match term {
         Term::Generic(term) => evaluate_neutral_value(ctx, env, env.get_binding(term)?.into()),
         Term::Func(patt, body) => {
@@ -52,10 +51,13 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
             Ok(Value::BinaryTupleType(patt, l_type, r_type))
         }
         Term::NatNum(n) => Ok(Value::NatNum(n)),
+        Term::StrLiteral(s) => Ok(Value::StrLiteral(s)),
         Term::EmptyTuple => Ok(Value::EmptyTuple),
         Term::Unit => Ok(Value::Unit),
+        Term::Nat => Ok(Value::Nat),
+        Term::Str => Ok(Value::Str),
         Term::Type => Ok(Value::Type),
-        Term::Nat => Ok(Value::Nat)
+        
     }
 }
 
@@ -105,8 +107,7 @@ fn evaluate_call(ctx: &mut Context, _env: &mut Environment, f: Value, v: Box<Val
     }
 }
 
-pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<Term, ElaborationError> {  
-    println!("QUOTE {:?}\n", &value);
+pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<Term, ElaborationError> { 
     match value {
         Value::Neutral(NeutralValue::Generic(g)) => env.get_unbinding(g).map(|x| x.into()),
         Value::Neutral(NeutralValue::Call(n, v)) => Ok(Term::Call(
@@ -141,6 +142,7 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
         )),
         Value::EmptyTuple => Ok(Term::EmptyTuple),
         Value::NatNum(n) => Ok(Term::NatNum(n)),
+        Value::StrLiteral(s) => Ok(Term::StrLiteral(s)),
 
         Value::FuncType(mut func_env, arg, arg_type, body_type) => {
             let g = GenericValue::new();
@@ -164,6 +166,7 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
         Value::BinaryTupleType(patt, l_type, r_type) => Ok(Term::BinaryTupleType(patt, Box::new(quote(ctx, env, *l_type)?), r_type)),
         Value::Unit => Ok(Term::Unit),
         Value::Nat => Ok(Term::Nat),
+        Value::Str => Ok(Term::Str),
     
         Value::Type => Ok(Term::Type),
     }
