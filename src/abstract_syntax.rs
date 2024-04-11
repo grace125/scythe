@@ -29,11 +29,11 @@ pub fn abstract_parse(cst: Option<CST>) -> SurfaceTerm {
             },
             OpKind::Tuple => abstract_parse_tuple(op),
 
-            OpKind::Add => todo!(),
-            OpKind::Sub => todo!(),
-            OpKind::Mul => todo!(),
-            OpKind::Div => todo!(),
-            OpKind::Mod => todo!(),
+            OpKind::Add => abstract_parse_bin_op(op, "_ + _"),
+            OpKind::Mul => abstract_parse_bin_op(op, "_ * _"),
+            OpKind::Sub => abstract_parse_sub(op),
+            OpKind::Div => abstract_parse_bin_op(op, "_ / _"),
+            OpKind::Mod => abstract_parse_bin_op(op, "_ % _"),
 
             OpKind::If => todo!(),
             OpKind::Then => todo!(),
@@ -68,6 +68,34 @@ fn abstract_parse_tuple(mut op: Op) -> SurfaceTerm {
         result = SurfaceTerm::BinaryTuple(Box::new(next), Box::new(result));
     }
     result
+}
+
+fn abstract_parse_bin_op(mut op: Op, s: impl Into<String>) -> SurfaceTerm {
+    let left = op.children.pop_front().unwrap();
+    let right = op.children.pop_front().unwrap();
+    SurfaceTerm::Call(
+        Box::new(SurfaceTerm::Generic(s.into())), 
+        Box::new(SurfaceTerm::BinaryTuple(
+            Box::new(abstract_parse(Some(left))), 
+            Box::new(abstract_parse(Some(right))), 
+        ))
+    )
+}
+
+fn abstract_parse_sub(mut op: Op) -> SurfaceTerm {
+    if op.children.len() == 2 {
+        abstract_parse_bin_op(op, "_ - _")
+    }
+    else {
+        let right = op.children.pop_front().unwrap();
+        SurfaceTerm::Call(
+            Box::new(SurfaceTerm::Generic("_ - _".to_owned())), 
+            Box::new(SurfaceTerm::BinaryTuple(
+                Box::new(SurfaceTerm::NatNum(0u32.into())), 
+                Box::new(abstract_parse(Some(right))), 
+            ))
+        )
+    }
 }
 
 fn abstract_parse_pattern(cst: CST) -> SurfacePattern {

@@ -3,8 +3,16 @@ use super::*;
 pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -> Result<Term, ElaborationError> {
     match t {
         Term::Generic(x) => {
-            ctx.insert_type(x, ty);
-            Ok(Term::Generic(x))
+            match env.get_binding(x).and_then(|g| env.get_substitution(g)) {
+                Some(v) => {
+                    let q = quote(ctx, env, v)?;
+                    check(ctx, env, q, ty)
+                },
+                None => {
+                    ctx.insert_type(x, ty);
+                    Ok(Term::Generic(x))
+                }
+            }
         },
         Term::Func(patt, body) => {
             let g = GenericValue::new();
@@ -28,9 +36,9 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
 
             Ok(Term::Func(patt, Box::new(body)))
         },
-        Term::BinaryTuple(l, r) => { // TODO: test me
+        Term::Tuple(l, r) => { // TODO: test me
             let g = GenericValue::new();
-            let Value::BinaryTupleType(patt, l_type, r_type) = ty else {
+            let Value::TupleType(patt, l_type, r_type) = ty else {
                 todo!() // TODO: improve error
             };
 
@@ -45,7 +53,7 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
 
             env.end_scope();
 
-            Ok(Term::BinaryTuple(l, r))
+            Ok(Term::Tuple(l, r))
         }
         Term::Nat |
         Term::Str |
@@ -57,7 +65,7 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
         Term::EmptyTuple |
         Term::FuncType(..) |
         Term::ExternalFunc(_) |
-        Term::BinaryTupleType(..) => {
+        Term::TupleType(..) => {
             let (t_prime, mut ty_prime) = infer(ctx, env, t)?;
             if def_equal(ctx, env, &mut ty, &mut ty_prime)? {
                 Ok(t_prime)
@@ -72,7 +80,13 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
 pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term, Value), ElaborationError> {
     match t {
         Term::Generic(x) => {
-            Ok((x.into(), ctx.get_type(x)?))
+            match env.get_binding(x).and_then(|g| env.get_substitution(g)) {
+                Some(v) => {
+                    let q = quote(ctx, env, v)?;
+                    infer(ctx, env, q)
+                },
+                None => Ok((x.into(), ctx.try_get_type(x)?))
+            }
         },
         Term::ExternalFunc(ext_func) => {
             let ty = Value::FuncType(
@@ -155,7 +169,7 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
 
             Ok((pi, Value::Type))
         },
-        Term::BinaryTupleType(patt, l_type, r_type) => {
+        Term::TupleType(patt, l_type, r_type) => {
             let g = GenericValue::new();
 
             let l_type = check(ctx, env, *l_type, Value::Type)?;
@@ -165,21 +179,21 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
 
             check_and_bind(ctx, env, patt.clone(), g.into(), l_type_value)?;
             let r_type = check(ctx, env, *r_type, Value::Type)?;
-            let sigma = Term::BinaryTupleType(patt, Box::new(l_type), Box::new(r_type));
+            let sigma = Term::TupleType(patt, Box::new(l_type), Box::new(r_type));
 
             env.end_scope();
 
             Ok((sigma, Value::Type))
         },
-        Term::BinaryTuple(l, r) => {
+        Term::Tuple(l, r) => {
 
             let (l, l_type) = infer(ctx, env, *l)?;
             let (r, r_type) = infer(ctx, env, *r)?;
             let r_type = quote(ctx, env, r_type)?;
 
             Ok((
-                Term::BinaryTuple(Box::new(l), Box::new(r)),
-                Value::BinaryTupleType(Pattern::Ignore, Box::new(l_type), Box::new(r_type))
+                Term::Tuple(Box::new(l), Box::new(r)),
+                Value::TupleType(Pattern::Ignore, Box::new(l_type), Box::new(r_type))
             ))
         },
         Term::NatNum(n) => Ok((Term::NatNum(n), Value::Nat)),

@@ -2,7 +2,7 @@ use super::*;
 
 pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<Value, ElaborationError> {
     match term {
-        Term::Generic(term) => evaluate_neutral_value(ctx, env, env.get_binding(term)?.into()),
+        Term::Generic(term) => evaluate_neutral_value(ctx, env, env.try_get_binding(term)?.into()),
         Term::Func(patt, body) => {
             let g = GenericValue::new();
             env.start_scope();
@@ -35,8 +35,12 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
             let x_val = evaluate(ctx, env, *x)?;
             evaluate_call(ctx, env, f_val, Box::new(x_val))
         },
-        Term::BinaryTuple(l, r) => Ok(Value::BinaryTuple(Box::new(evaluate(ctx, env, *l)?), Box::new(evaluate(ctx, env, *r)?))),
-        Term::BinaryTupleType(patt, l_type, r_type) => {
+        Term::Tuple(l, r) => {
+            let left = evaluate(ctx, env, *l)?;
+            let right = evaluate(ctx, env, *r)?;
+            Ok(evaluate_tuple(ctx, env, left, right))
+        },
+        Term::TupleType(patt, l_type, r_type) => {
             let l_type = Box::new(evaluate(ctx, env, *l_type)?);
             let g = GenericValue::new();
 
@@ -48,7 +52,7 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
 
             env.end_scope();
 
-            Ok(Value::BinaryTupleType(patt, l_type, r_type))
+            Ok(Value::TupleType(patt, l_type, r_type))
         }
         Term::NatNum(n) => Ok(Value::NatNum(n)),
         Term::StrLiteral(s) => Ok(Value::StrLiteral(s)),
@@ -76,7 +80,16 @@ fn evaluate_neutral_value(ctx: &mut Context, env: &mut Environment, neutral: Neu
         NeutralValue::ExternalCall(mut ext_call, n) => match evaluate_neutral_value(ctx, env, *n)? {
             Value::Neutral(n) => Ok(Value::Neutral(NeutralValue::ExternalCall(ext_call, Box::new(n)))),
             v => Ok((*ext_call.func)(v)?)
-        }
+        },
+        NeutralValue::TupleLeft(l, r) => {
+            let l = evaluate_neutral_value(ctx, env, *l)?;
+            let r = if let Value::Neutral(n) = *r { evaluate_neutral_value(ctx, env, n)? } else { *r };
+            Ok(evaluate_tuple(ctx, env, l, r))
+        },
+        NeutralValue::TupleRight(l, r) => {
+            let r = evaluate_neutral_value(ctx, env, *r)?;
+            Ok(evaluate_tuple(ctx, env, *l, r))
+        },
     }
 }
 
@@ -107,9 +120,17 @@ fn evaluate_call(ctx: &mut Context, _env: &mut Environment, f: Value, v: Box<Val
     }
 }
 
+fn evaluate_tuple(_ctx: &mut Context, _env: &mut Environment, left: Value, right: Value) -> Value {
+    match (left, right) {
+        (Value::Neutral(n_left), right) => NeutralValue::TupleLeft(Box::new(n_left), Box::new(right)).into(),
+        (left, Value::Neutral(n_right)) => NeutralValue::TupleRight(Box::new(left), Box::new(n_right)).into(),
+        (left, right) => Value::Tuple(Box::new(left), Box::new(right))
+    }
+}
+
 pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<Term, ElaborationError> { 
     match value {
-        Value::Neutral(NeutralValue::Generic(g)) => env.get_unbinding(g).map(|x| x.into()),
+        Value::Neutral(NeutralValue::Generic(g)) => env.try_get_unbinding(g).map(|x| x.into()),
         Value::Neutral(NeutralValue::Call(n, v)) => Ok(Term::Call(
             Box::new(quote(ctx, env, (*n).into())?), 
             Box::new(quote(ctx, env, *v)?)
@@ -117,6 +138,14 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
         Value::Neutral(NeutralValue::ExternalCall(ext_call, n)) => Ok(Term::Call(
             Box::new(quote(ctx, env, Value::ExternalFunc(*ext_call))?), 
             Box::new(quote(ctx, env, (*n).into())?)
+        )),
+        Value::Neutral(NeutralValue::TupleLeft(l, r)) => Ok(Term::Tuple(
+            Box::new(quote(ctx, env, Value::Neutral(*l))?), 
+            Box::new(quote(ctx, env, *r)?), 
+        )),
+        Value::Neutral(NeutralValue::TupleRight(l, r)) => Ok(Term::Tuple(
+            Box::new(quote(ctx, env, *l)?), 
+            Box::new(quote(ctx, env, Value::Neutral(*r))?), 
         )),
         Value::Func(mut func_env, arg, body) => { // TODO: fix function quoting's exponential behaviour
             func_env.start_scope();
@@ -136,7 +165,7 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
             Ok(f)
         },
         Value::ExternalFunc(ext_func) => Ok(Term::ExternalFunc(ext_func)),
-        Value::BinaryTuple(l, r) => Ok(Term::BinaryTuple(
+        Value::Tuple(l, r) => Ok(Term::Tuple(
             Box::new(quote(ctx, env, *l)?), 
             Box::new(quote(ctx, env, *r)?)
         )),
@@ -163,7 +192,7 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
 
             Ok(f)
         },
-        Value::BinaryTupleType(patt, l_type, r_type) => Ok(Term::BinaryTupleType(patt, Box::new(quote(ctx, env, *l_type)?), r_type)),
+        Value::TupleType(patt, l_type, r_type) => Ok(Term::TupleType(patt, Box::new(quote(ctx, env, *l_type)?), r_type)),
         Value::Unit => Ok(Term::Unit),
         Value::Nat => Ok(Term::Nat),
         Value::Str => Ok(Term::Str),

@@ -11,7 +11,7 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
         (Value::EmptyTuple, Value::EmptyTuple) => Ok(true),
 
         (Value::Func(e1, p1, b1), Value::Func(e2, p2, b2)) => def_equal_func(ctx, env, e1, p1, b1, e2, p2, b2),
-        (Value::BinaryTuple(l1, r1), Value::BinaryTuple(l2, r2)) => Ok(def_equal(ctx, env, l1, l2)? && def_equal(ctx, env, r1, r2)?),
+        (Value::Tuple(l1, r1), Value::Tuple(l2, r2)) => Ok(def_equal(ctx, env, l1, l2)? && def_equal(ctx, env, r1, r2)?),
         (Value::FuncType(env_l, patt_l, arg_l_type, body_l_type), Value::FuncType(env_r, patt_r, arg_r_type, body_r_type)) => {
             if !def_equal(ctx, env, &mut **arg_l_type, &mut **arg_r_type)? {
                 return Ok(false);
@@ -19,7 +19,7 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
 
             def_equal_func(ctx, env, env_l, patt_l, body_l_type, env_r, patt_r, body_r_type)
         },
-        (Value::BinaryTupleType(patt1, l1_type, r1_type), Value::BinaryTupleType(patt2, l2_type, r2_type)) => {
+        (Value::TupleType(patt1, l1_type, r1_type), Value::TupleType(patt2, l2_type, r2_type)) => {
             if !def_equal(ctx, env, l1_type, l2_type)? {
                 return Ok(false);
             }
@@ -49,8 +49,8 @@ pub fn def_equal(ctx: &mut Context, env: &mut Environment, l: &mut Value, r: &mu
         (Value::NatNum(n1), Value::NatNum(n2)) => Ok(n1 == n2),
         (Value::StrLiteral(s1), Value::StrLiteral(s2)) => Ok(s1 == s2),
 
-        (Value::BinaryTuple(..), _) |
-        (Value::BinaryTupleType(..), _) |
+        (Value::Tuple(..), _) |
+        (Value::TupleType(..), _) |
         (Value::ExternalFunc(_), _) |
         (Value::Neutral(_), _) |
         (Value::NatNum(_), _) |
@@ -90,6 +90,10 @@ fn def_equal_neutral(ctx: &mut Context, env: &mut Environment, n1: &mut NeutralV
         (NeutralValue::Generic(g1), NeutralValue::Generic(g2)) => Ok(g1 == g2),
         (NeutralValue::Call(n1, v1), NeutralValue::Call(n2, v2)) => Ok(def_equal_neutral(ctx, env, n1, n2)? && def_equal(ctx, env, v1, v2)?),
         (NeutralValue::ExternalCall(ext_fn1, n1), NeutralValue::ExternalCall(ext_fn2, n2)) => Ok(ext_fn1 == ext_fn2 && def_equal_neutral(ctx, env, n1, n2)?),
+        (NeutralValue::TupleLeft(l1, r1), NeutralValue::TupleLeft(l2, r2)) => Ok(def_equal_neutral(ctx, env, l1, l2)? && def_equal(ctx, env, r1, r2)?),
+        (NeutralValue::TupleRight(l1, r1), NeutralValue::TupleRight(l2, r2)) => Ok(def_equal(ctx, env, l1, l2)? && def_equal_neutral(ctx, env, r1, r2)?),
+        (NeutralValue::TupleLeft(..), _) |
+        (NeutralValue::TupleRight(..), _) |
         (NeutralValue::ExternalCall(..), _) |
         (NeutralValue::Generic(_), _) |
         (NeutralValue::Call(..), _) => Ok(false),

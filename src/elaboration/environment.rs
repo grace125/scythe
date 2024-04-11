@@ -12,21 +12,31 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn get_binding(&self, x: GenericTerm) -> Result<GenericValue, ElaborationError> {
-        self.bindings.get(&x).map(|(g, _)| g).copied().ok_or(ElaborationError::BindingNotFound(x))
+    pub fn get_binding(&self, x: GenericTerm) -> Option<GenericValue> {
+        self.bindings.get(&x).map(|(g, _)| g).copied()
     }
 
-    pub fn get_unbinding(&self, g: GenericValue) -> Result<GenericTerm, ElaborationError> {
-        self.unbindings.get(&g).map(|(x, _)| x).copied().ok_or(ElaborationError::UnbindingNotFound(g))
+    pub fn get_unbinding(&self, g: GenericValue) -> Option<GenericTerm> {
+        self.unbindings.get(&g).map(|(x, _)| x).copied()
     }
 
     pub fn get_substitution(&self, g: GenericValue) -> Option<Value> {
         self.substitutions.get(&g).map(|(v, _)| v).cloned()
     }
 
-    pub fn get(&self, x: GenericTerm) -> Result<Value, ElaborationError> {
+
+
+    pub fn try_get_binding(&self, x: GenericTerm) -> Result<GenericValue, ElaborationError> {
+        self.get_binding(x).ok_or(ElaborationError::BindingNotFound(x))
+    }
+
+    pub fn try_get_unbinding(&self, g: GenericValue) -> Result<GenericTerm, ElaborationError> {
+        self.get_unbinding(g).ok_or(ElaborationError::UnbindingNotFound(g))
+    }
+
+    pub fn get(&self, x: GenericTerm) -> Option<Value> {
         let g = self.get_binding(x)?;
-        Ok(self.get_substitution(g).unwrap_or(g.into()))
+        Some(self.get_substitution(g).unwrap_or(g.into()))
     }
 
     pub fn insert_binding(&mut self, x: GenericTerm, g: GenericValue) {
@@ -168,15 +178,32 @@ impl Context {
         ctx .bind("Unit", Value::Unit)
             .bind("Type", Value::Type)
             .bind("Nat", Value::Nat)
+            .bind("Str", Value::Str)
+            .bind("_ + _", binary_nat_func(|l, r| l + r))
+            .bind("_ - _", binary_nat_func(|l, r| l - r))
+            .bind("_ * _", binary_nat_func(|l, r| l * r))
+            .bind("_ / _", binary_nat_func(|l, r| l / r))
+            .bind("_ % _", binary_nat_func(|l, r| l % r))
             .add_keyword("Unit")
             .add_keyword("Type")
-            .add_keyword("Void")
-            .add_keyword("Nat");
+            .add_keyword("Nat")
+            .add_keyword("Str")
+            .add_keyword("_ + _")
+            .add_keyword("_ - _")
+            .add_keyword("_ * _")
+            .add_keyword("_ / _")
+            .add_keyword("_ % _")
+
+            .add_keyword("Void");
         ctx
     }
 
-    pub fn get_type(&self, x: GenericTerm) -> Result<Value, ElaborationError> {
-        self.types.get(&x).cloned().map(|(ty, _)| ty).ok_or(ElaborationError::TypeNotFound(x))
+    pub fn get_type(&self, x: GenericTerm) -> Option<Value> {
+        self.types.get(&x).cloned().map(|(ty, _)| ty)
+    }
+
+    pub fn try_get_type(&self, x: GenericTerm) -> Result<Value, ElaborationError> {
+        self.get_type(x).ok_or(ElaborationError::TypeNotFound(x))
     }
 
     pub fn insert_type(&mut self, x: GenericTerm, ty: Value) {
@@ -221,6 +248,20 @@ impl Context {
         
         self.bind(id, v)
     }
+}
+
+fn binary_nat_func(f: fn(BigUint, BigUint) -> BigUint) -> Value { 
+    Value::ExternalFunc(ExternalFunction::new(
+        Pattern::Ignore, 
+        Value::TupleType(Pattern::Ignore, Box::new(Value::Nat), Box::new(Term::Nat)), 
+        Term::Nat, 
+        move |v| {
+            let Value::Tuple(l, r) = v else { unreachable!() };
+            let Value::NatNum(l) = *l else { unreachable!() };
+            let Value::NatNum(r) = *r else { unreachable!() };
+            Ok(Value::NatNum(f(l, r)))
+        }
+    ))
 }
 
 #[derive(Debug)]

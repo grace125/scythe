@@ -32,6 +32,18 @@ pub struct ExternalFunction {
     pub(crate) func: Box<dyn ScytheFunction>
 }
 
+impl ExternalFunction {
+    pub fn new(pattern: Pattern, arg_type: Value, body_type: Term, f: impl ScytheFunction + 'static) -> ExternalFunction {
+        ExternalFunction {
+            id: ExternalFunctionId::new(),
+            pattern,
+            arg_type: Box::new(arg_type),
+            body_type: Box::new(body_type),
+            func: Box::new(f)
+        }
+    }
+}
+
 impl PartialEq for ExternalFunction {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id

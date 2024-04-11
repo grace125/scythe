@@ -44,13 +44,13 @@ pub enum Term {
 
     Func(Pattern, Box<Term>),
     ExternalFunc(ExternalFunction),
-    BinaryTuple(Box<Term>, Box<Term>),
+    Tuple(Box<Term>, Box<Term>),
     EmptyTuple,
     NatNum(BigUint),
     StrLiteral(String),
 
     FuncType(Pattern, Box<Term>, Box<Term>),
-    BinaryTupleType(Pattern, Box<Term>, Box<Term>),
+    TupleType(Pattern, Box<Term>, Box<Term>),
     Unit,
     Nat,
     Str,
@@ -70,13 +70,13 @@ pub enum Value {
 
     Func(Environment, Pattern, Box<Term>), 
     ExternalFunc(ExternalFunction),
-    BinaryTuple(Box<Value>, Box<Value>),
+    Tuple(Box<Value>, Box<Value>),
     EmptyTuple, 
     NatNum(BigUint),
     StrLiteral(String),
     
     FuncType(Environment, Pattern, Box<Value>, Box<Term>),
-    BinaryTupleType(Pattern, Box<Value>, Box<Term>),
+    TupleType(Pattern, Box<Value>, Box<Term>),
     Unit,
     Nat,
     Str,
@@ -109,7 +109,10 @@ impl From<NeutralValue> for Value {
 pub enum NeutralValue {
     Generic(GenericValue),
     Call(Box<NeutralValue>, Box<Value>),
-    ExternalCall(Box<ExternalFunction>, Box<NeutralValue>)
+    ExternalCall(Box<ExternalFunction>, Box<NeutralValue>),
+    TupleLeft(Box<NeutralValue>, Box<Value>),
+    /// This value's left element is not neutral
+    TupleRight(Box<Value>, Box<NeutralValue>)
 }
 
 impl From<GenericValue> for NeutralValue {

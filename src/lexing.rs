@@ -32,11 +32,12 @@ pub struct SyntaxInfo;
 #[logos(extras = TokenExtras)]
 #[logos(skip r"[ \t\n\f]+")]
 enum Token {
-    #[regex("\"(\\\\.|[^\"\\\\])*\"",                                            str_callback,   priority = 1)]
-    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                                          id_callback,    priority = 1)]
-    #[regex(r"[0-9]+",                                                          nat_callback,   priority = 2)] 
-    #[regex(r"[0-9]+\.[0-9]*",                                                  float_callback, priority = 2)]
-    #[regex(r"([\[\]{}();:,+*-/%,]|=>|->|:=|let|if|then|else|match|on|==>)",    op_callback,    priority = 2)]
+    #[regex("\"(\\\\.|[^\"\\\\])*\"",                                           str_callback,           priority = 1)]
+    #[regex("`[^`]*`",                                                             id_literal_callback,    priority = 1)]
+    #[regex(r"[a-zA-Z_][0-9a-zA-Z_]*",                                          id_callback,            priority = 1)]
+    #[regex(r"[0-9]+",                                                          nat_callback,           priority = 2)] 
+    #[regex(r"[0-9]+\.[0-9]*",                                                  float_callback,         priority = 2)]
+    #[regex(r"([\[\]{}();:,+*-/%,]|=>|->|:=|let|if|then|else|match|on|==>)",    op_callback,            priority = 2)]
     Token((TokenInfo, CST)),
 }
 
@@ -51,7 +52,6 @@ fn get_info_for_literals(lex: &mut Lexer<Token>) -> TokenInfo {
 
 fn id_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
     (get_info_for_literals(lex), CST::Id(lex.slice().to_string()))
-    
 }
 
 fn nat_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingError> {
@@ -68,7 +68,7 @@ fn float_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingErro
         .or_else(|_e| Err(LexingError::InvalidFloatLiteral))
 }
 
-fn str_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingError> {
+fn str_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
     let info = get_info_for_literals(lex);
     let s = lex .slice();
     let s = s[1..s.len()-1]
@@ -78,7 +78,14 @@ fn str_callback(lex: &mut Lexer<Token>) -> Result<(TokenInfo, CST), LexingError>
         .replace("\\'", "'")
         .replace(r"\\", r"\");
 
-    Ok((info, CST::Str(s)))
+    (info, CST::Str(s))
+}
+
+fn id_literal_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {
+    let info = get_info_for_literals(lex);
+    let s = lex .slice();
+    let s = s[1..s.len()-1].to_owned();
+    (info, CST::Id(s))
 }
 
 fn op_callback(lex: &mut Lexer<Token>) -> (TokenInfo, CST) {

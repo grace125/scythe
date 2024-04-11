@@ -100,7 +100,7 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
             Ok(Term::Call(Box::new(f), Box::new(x)))
         },
         
-        SurfaceTerm::BinaryTuple(l, r) => Ok(Term::BinaryTuple(
+        SurfaceTerm::BinaryTuple(l, r) => Ok(Term::Tuple(
             Box::new(to_core_inner(ctx, senv, *l)?), 
             Box::new(to_core_inner(ctx, senv, *r)?)
         )),
@@ -125,7 +125,7 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
             let patt = surface_bind_pattern(ctx, senv, patt)?;
             let r_type = Box::new(to_core_inner(ctx, senv, *r_type)?);
             senv.end_scope();
-            Ok(Term::BinaryTupleType(patt, l_type, r_type))
+            Ok(Term::TupleType(patt, l_type, r_type))
         }
         SurfaceTerm::Type => Ok(Term::Type),
     }
