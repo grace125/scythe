@@ -1,4 +1,3 @@
-use logos::Source;
 use num_bigint::BigUint;
 
 use crate::{concrete_syntax::{Op, CST}, elaboration::{SurfacePattern, SurfaceTerm}, lexing::OpKind};
@@ -39,9 +38,8 @@ pub fn abstract_parse(cst: Option<CST>) -> SurfaceTerm {
             OpKind::Then => todo!(),
             OpKind::Else => todo!(),
 
-            OpKind::Semicolon => todo!(),
+            OpKind::Semicolon => abstract_parse_semicolon(op),
             OpKind::Let => todo!(),
-            OpKind::Assignment => todo!(),
             
             OpKind::FuncType => todo!(),
 
@@ -50,8 +48,12 @@ pub fn abstract_parse(cst: Option<CST>) -> SurfaceTerm {
             OpKind::Root => todo!(),
             
             OpKind::Match => todo!(),
-            OpKind::On => todo!(),
-            OpKind::MatchArm => todo!(),
+
+
+            OpKind::Assignment => panic!("Unmatched assign op"),
+            OpKind::On => panic!("Unmatched on"),
+            OpKind::MatchArm => panic!("Unmatched match arm"),
+            
 
             OpKind::BraceEnd => panic!("Unmatched brace"),
             OpKind::BracketEnd => panic!("Unmatched bracket"),
@@ -95,6 +97,26 @@ fn abstract_parse_sub(mut op: Op) -> SurfaceTerm {
                 Box::new(abstract_parse(Some(right))), 
             ))
         )
+    }
+}
+
+fn abstract_parse_semicolon(mut op: Op) -> SurfaceTerm {
+    match op.children.len() {
+        0 => SurfaceTerm::EmptyTuple,
+        1 => abstract_parse(Some(op.children.pop_front().unwrap())),
+        _ => {
+            let left = op.children.pop_front().unwrap();
+            match left {
+                CST::Op(mut let_op) if let_op.kind == OpKind::Let => {
+                    let let_pattern = abstract_parse_pattern(let_op.children.pop_front().unwrap());
+                    let let_binding = abstract_parse(Some(let_op.children.pop_front().unwrap()));
+                    SurfaceTerm::Let(let_pattern, Box::new(let_binding), Box::new(abstract_parse_semicolon(op)))
+                },
+                _left => {
+                    todo!()
+                }
+            }
+        }
     }
 }
 

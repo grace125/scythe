@@ -1,30 +1,44 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, fmt::Debug};
 use super::*;
 use std::hash::Hash;
 
 #[derive(Clone, Debug)]
 pub struct Environment {
     depth: usize,
-    bindings: HashMap<GenericTerm, (GenericValue, usize)>,
-    unbindings: HashMap<GenericValue, (GenericTerm, usize)>,
-    substitutions: HashMap<GenericValue, (Value, usize)>,
+    bindings:       HashMap<GenericTerm,  Depthed<GenericValue>>,
+    unbindings:     HashMap<GenericValue, Depthed<GenericTerm>>,
+    substitutions:  HashMap<GenericValue, Depthed<Value>>,
+    pub(crate) holes:          HashMap<Hole,         Depthed<Option<Value>>>,
     history: History
+}
+
+pub struct Depthed<T> {
+    item: T,
+    depth: usize
+}
+
+impl<T: Clone> Clone for Depthed<T> {
+    fn clone(&self) -> Self { Self { item: self.item.clone(), depth: self.depth.clone() }}
+}
+
+impl<T: Debug> Debug for Depthed<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.item)
+    }
 }
 
 impl Environment {
     pub fn get_binding(&self, x: GenericTerm) -> Option<GenericValue> {
-        self.bindings.get(&x).map(|(g, _)| g).copied()
+        self.bindings.get(&x).map(|g| g.item)
     }
 
     pub fn get_unbinding(&self, g: GenericValue) -> Option<GenericTerm> {
-        self.unbindings.get(&g).map(|(x, _)| x).copied()
+        self.unbindings.get(&g).map(|x| x.item)
     }
 
     pub fn get_substitution(&self, g: GenericValue) -> Option<Value> {
-        self.substitutions.get(&g).map(|(v, _)| v).cloned()
+        self.substitutions.get(&g).map(|v| v.item.clone())
     }
-
-
 
     pub fn try_get_binding(&self, x: GenericTerm) -> Result<GenericValue, ElaborationError> {
         self.get_binding(x).ok_or(ElaborationError::BindingNotFound(x))
@@ -40,14 +54,15 @@ impl Environment {
     }
 
     pub fn insert_binding(&mut self, x: GenericTerm, g: GenericValue) {
-        let prev_bind_entry = self.bindings.insert(x, (g, self.depth));
-        let prev_unbind_entry = self.unbindings.insert(g, (x, self.depth));
+        let prev_bind_entry = self.bindings.insert(x, Depthed { item: g, depth: self.depth });
+        let prev_unbind_entry = self.unbindings.insert(g, Depthed { item: x, depth: self.depth });
         self.history.remember_binding(x, prev_bind_entry, self.depth);
         self.history.remember_unbinding(g, prev_unbind_entry, self.depth);
     }
 
     pub fn insert_substitution(&mut self, g: GenericValue, v: Value) {
-        let prev_entry = self.substitutions.insert(g, (v, self.depth));
+        debug_assert!(!v.is_generic_value());
+        let prev_entry = self.substitutions.insert(g, Depthed { item: v, depth: self.depth });
         self.history.remember_substitution(g, prev_entry, self.depth)
     }
 
@@ -64,13 +79,23 @@ impl Environment {
         }
     }
 
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
     pub fn start_scope(&mut self) {
         self.history.push_row();
         self.depth += 1;
     }
 
     pub fn end_scope(&mut self) {
-        let HistoryRow { bindings, unbindings, substitutions } = self.history.pop_row();
+        let HistoryRow { bindings, unbindings, substitutions, holes } = self.history.pop_row();
+        for (h, opt_v) in holes {
+            let value = self.holes.remove(&h);
+            assert!(value.is_some()); // TODO: improve error
+
+            insert_or_remove(&mut self.holes, h, opt_v)
+        }
         for (x, opt_g) in bindings {
             insert_or_remove(&mut self.bindings, x, opt_g);
         }
@@ -80,7 +105,14 @@ impl Environment {
         for (g, opt_v) in substitutions {
             insert_or_remove(&mut self.substitutions, g, opt_v);
         }
+        
         self.depth -= 1;
+    }
+
+    pub fn end_scope_to_depth(&mut self, desired_depth: usize) {
+        while self.depth > desired_depth {
+            self.end_scope();
+        }
     }
 
     pub fn clone_for_closure(&mut self) -> Self {
@@ -89,8 +121,84 @@ impl Environment {
             bindings: self.bindings.clone(),
             unbindings: self.unbindings.clone(),
             substitutions: self.substitutions.clone(),
+            holes: HashMap::new(),
             history: History::new(self.depth),
         }
+    }
+
+    pub fn fresh_hole(&mut self, h: Hole) {
+        let prev_entry = self.holes.insert(h, Depthed { item: None, depth: self.depth });
+        self.history.remember_hole(h, prev_entry, self.depth)
+    }
+
+    pub fn new_hole(&mut self) -> Hole {
+        let h = Hole::new();
+        self.fresh_hole(h);
+        dbg!(&self.holes);
+        h
+    }
+
+    pub fn get_hole(&self, h: Hole) -> Option<Value> {
+        self.holes.get(&h).map(|v| v.item.clone()).flatten()
+    }
+
+    pub(crate) fn unify_empty_holes(&mut self, h1: Hole, h2: Hole) -> Result<(), ElaborationError> {
+        debug_assert_ne!(h1, h2);
+        let Some(v1) = self.holes.remove(&h1) else {
+            return Err(ElaborationError::HoleNotFound(h1));
+        };
+        let Some(v2) = self.holes.remove(&h2) else {
+            return Err(ElaborationError::HoleNotFound(h2));
+        };
+
+        debug_assert!(v1.item.is_none());
+        debug_assert!(v2.item.is_none());
+
+        let ((_h1, mut v1), (h2, v2)) = if v1.depth > v2.depth || (v1.depth == v2.depth && h1 > h2) {
+            ((h1, v1), (h2, v2))
+        } else {
+            ((h2, v2), (h1, v1))
+        };
+
+        v1.item = Some(Value::Hole(h2));
+
+        self.holes.insert(h1, v1);
+        self.holes.insert(h2, v2);
+
+        Ok(())
+    }
+
+    pub(crate) fn assign_to_empty_hole(&mut self, h: Hole, v: Value) -> Result<(), ElaborationError> {
+        let h = self.holes.get_mut(&h).ok_or(ElaborationError::HoleNotFound(h))?;
+        debug_assert!(h.item.is_none());
+        h.item = Some(v);
+        Ok(())
+    }
+
+    /// Updates `v` to either be a non-hole value, or a hole which is bound to nothing
+    pub(crate) fn update_hole(&mut self, v: &mut Value) -> Result<(), ElaborationError> {
+        while let Value::Hole(h) = v {
+            if let Some(v_next) = self.get_hole(*h) {
+                *v = v_next;
+            }
+            else {
+                break
+            }
+        }
+        Ok(()) // TODO: make function not return result
+        // loop {
+        //     if let Value::Hole(h) = v {
+        //         if let Some(v2) = self.holes.get(h) {
+        //             *v = v2.item
+        //         }
+        //         else {
+        //             return Err(ElaborationError::HoleNotFound(*h));
+        //         }
+        //     }
+        //     else {
+        //         break Ok(());
+        //     }
+        // }
     }
 }
 
@@ -127,24 +235,30 @@ impl History {
         self.rows.pop().unwrap()
     }
 
-    fn remember_binding(&mut self, x: GenericTerm, g: Option<(GenericValue, usize)>, depth: usize) {
+    fn remember_binding(&mut self, x: GenericTerm, g: Option<Depthed<GenericValue>>, depth: usize) {
         self.rows[depth - self.start_depth].bindings.insert(x, g);
     }
 
-    fn remember_unbinding(&mut self, g: GenericValue, x: Option<(GenericTerm, usize)>, depth: usize) {
+    fn remember_unbinding(&mut self, g: GenericValue, x: Option<Depthed<GenericTerm>>, depth: usize) {
         self.rows[depth - self.start_depth].unbindings.insert(g, x);
     }
 
-    fn remember_substitution(&mut self, g: GenericValue, v: Option<(Value, usize)>, depth: usize) {
+    fn remember_substitution(&mut self, g: GenericValue, v: Option<Depthed<Value>>, depth: usize) {
         self.rows[depth - self.start_depth].substitutions.insert(g, v);
+    }
+
+    fn remember_hole(&mut self, h: Hole, v: Option<Depthed<Option<Value>>>, depth: usize) {
+        self.rows[depth - self.start_depth].holes.insert(h, v);
+        dbg!(&self.rows[depth - self.start_depth].holes);
     }
 }
 
 #[derive(Default, Clone, Debug)]
 struct HistoryRow {
-    bindings: HashMap<GenericTerm, Option<(GenericValue, usize)>>,
-    unbindings: HashMap<GenericValue, Option<(GenericTerm, usize)>>,
-    substitutions: HashMap<GenericValue, Option<(Value, usize)>>,
+    bindings: HashMap<GenericTerm, Option<Depthed<GenericValue>>>,
+    unbindings: HashMap<GenericValue, Option<Depthed<GenericTerm>>>,
+    substitutions: HashMap<GenericValue, Option<Depthed<Value>>>,
+    holes: HashMap<Hole, Option<Depthed<Option<Value>>>>,
 }
 
 #[derive(Debug)]
@@ -170,6 +284,7 @@ impl Context {
                 bindings: Default::default(), 
                 unbindings: Default::default(), 
                 substitutions: Default::default(), 
+                holes: Default::default(),
                 history: Default::default()
             }, 
             surface_variables: Default::default(),
@@ -211,6 +326,10 @@ impl Context {
         self.history.remember(x, prev_entry, self.depth);
     }
 
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
     pub fn start_scope(&mut self) {
         self.history.push_row();
         self.depth += 1;
@@ -222,6 +341,12 @@ impl Context {
             insert_or_remove(&mut self.types, x, opt_ty);
         }
         self.depth -= 1;
+    }
+
+    pub fn end_scope_to_depth(&mut self, desired_depth: usize) {
+        while self.depth > desired_depth {
+            self.end_scope();
+        }
     }
 
     pub fn global_environment(&self) -> Environment {
@@ -248,12 +373,14 @@ impl Context {
         
         self.bind(id, v)
     }
+
+    
 }
 
 fn binary_nat_func(f: fn(BigUint, BigUint) -> BigUint) -> Value { 
     Value::ExternalFunc(ExternalFunction::new(
-        Pattern::Ignore, 
-        Value::TupleType(Pattern::Ignore, Box::new(Value::Nat), Box::new(Term::Nat)), 
+        Pattern::blank(), 
+        Value::TupleType(Pattern::blank(), Box::new(Value::Nat), Box::new(Term::Nat)), 
         Term::Nat, 
         move |v| {
             let Value::Tuple(l, r) = v else { unreachable!() };

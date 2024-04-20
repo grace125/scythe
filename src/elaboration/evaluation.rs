@@ -1,8 +1,22 @@
 use super::*;
 
+
+pub fn evaluate_recoverable(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<Value, ElaborationError> {
+    let depth = env.depth();
+    env.start_scope();
+    let eval = evaluate(ctx, env, term);
+    env.end_scope_to_depth(depth);
+    eval
+}
+
 pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<Value, ElaborationError> {
     match term {
         Term::Generic(term) => evaluate_neutral_value(ctx, env, env.try_get_binding(term)?.into()),
+        Term::Hole(h) => Ok(Value::Hole(h)),
+        Term::Let(patt, bindee, rest) => {
+            let bindee = evaluate(ctx, env, *bindee)?;
+            evaluate_let(ctx, env, patt, bindee, *rest)
+        },
         Term::Func(patt, body) => {
             let g = GenericValue::new();
             env.start_scope();
@@ -61,7 +75,6 @@ pub fn evaluate(ctx: &mut Context, env: &mut Environment, term: Term) -> Result<
         Term::Nat => Ok(Value::Nat),
         Term::Str => Ok(Value::Str),
         Term::Type => Ok(Value::Type),
-        
     }
 }
 
@@ -76,6 +89,10 @@ fn evaluate_neutral_value(ctx: &mut Context, env: &mut Environment, neutral: Neu
             }
             None => Ok(neutral.into()),
         },
+        NeutralValue::Let(patt, bindee, rest) => {
+            let bindee = evaluate_neutral_value(ctx, env, *bindee)?;
+            evaluate_let(ctx, env, patt, bindee, *rest)
+        }
         NeutralValue::Call(f, v) => evaluate_call(ctx, env, (*f).into(), v),
         NeutralValue::ExternalCall(mut ext_call, n) => match evaluate_neutral_value(ctx, env, *n)? {
             Value::Neutral(n) => Ok(Value::Neutral(NeutralValue::ExternalCall(ext_call, Box::new(n)))),
@@ -128,12 +145,34 @@ fn evaluate_tuple(_ctx: &mut Context, _env: &mut Environment, left: Value, right
     }
 }
 
+fn evaluate_let(ctx: &mut Context, env: &mut Environment, patt: Pattern, bindee: Value, rest: Term) -> Result<Value, ElaborationError> {
+    if let Value::Neutral(n) = bindee {
+        let g = GenericValue::new();
+        env.start_scope();
+        bind(ctx, env, &patt, g.into())?;
+        let rest_eval = evaluate(ctx, env, rest)?;
+        let rest = quote(ctx, env, rest_eval)?;
+        env.end_scope();
+        Ok(Value::Neutral(NeutralValue::Let(patt, Box::new(n), Box::new(rest))))
+    }
+    else {
+        bind(ctx, env, &patt, bindee)?;
+        evaluate(ctx, env, rest)
+    }
+}
+
 pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<Term, ElaborationError> { 
     match value {
+        Value::Hole(h) => Ok(Term::Hole(h)),
         Value::Neutral(NeutralValue::Generic(g)) => env.try_get_unbinding(g).map(|x| x.into()),
         Value::Neutral(NeutralValue::Call(n, v)) => Ok(Term::Call(
             Box::new(quote(ctx, env, (*n).into())?), 
             Box::new(quote(ctx, env, *v)?)
+        )),
+        Value::Neutral(NeutralValue::Let(patt, bindee, rest)) => Ok(Term::Let(
+            patt, 
+            Box::new(quote(ctx, env, (*bindee).into())?), 
+            rest
         )),
         Value::Neutral(NeutralValue::ExternalCall(ext_call, n)) => Ok(Term::Call(
             Box::new(quote(ctx, env, Value::ExternalFunc(*ext_call))?), 
@@ -198,6 +237,8 @@ pub fn quote(ctx: &mut Context, env: &mut Environment, value: Value) -> Result<T
         Value::Str => Ok(Term::Str),
     
         Value::Type => Ok(Term::Type),
+
+        Value::Annotation(..) | Value::Binder(..) | Value::BlankBinder => todo!(),
     }
 }
 
@@ -210,7 +251,7 @@ pub mod tests {
         let ctx = &mut Context::empty();
         let env = &mut ctx.global_environment();
         let mut w = surface_evaluate_with_context(ctx, s).unwrap();
-        assert!(def_equal(ctx, env, &mut v, &mut w).unwrap());
+        assert!(equal(ctx, env, &mut v, &mut w));
     }
 
     pub fn assert_evaluates_to_eq(s1: SurfaceTerm, s2: SurfaceTerm) {
@@ -220,9 +261,9 @@ pub mod tests {
         let t2 = to_core(ctx, s2).unwrap();
         let mut v1 = evaluate(ctx, env, t1).unwrap();
         let mut v2 = evaluate(ctx, env, t2).unwrap();
-        let res = def_equal(ctx, env, &mut v1, &mut v2);
-        println!("{:?}", res);
-        assert!(res.unwrap());
+        let eq = equal(ctx, env, &mut v1, &mut v2);
+        println!("{:?}", eq);
+        assert!(eq);
     }
 
     #[test]

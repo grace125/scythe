@@ -4,8 +4,8 @@ mod environment;
 mod evaluation;
 mod type_checking;
 mod pattern_matching;
-mod equality;
 mod external_function;
+mod unification;
 
 pub use generic::*;
 use num_bigint::BigUint;
@@ -15,7 +15,7 @@ pub use environment::*;
 use thiserror::Error;
 pub use type_checking::*;
 pub(crate) use pattern_matching::*;
-pub use equality::*;
+pub use unification::*;
 
 use self::external_function::ExternalFunction;
 
@@ -26,19 +26,34 @@ use self::external_function::ExternalFunction;
 
 
 #[derive(Clone, Debug)]
-pub enum Pattern {
-    Ignore,
-    EmptyTuple,
-    Generic(GenericTerm),
-    Annotation(Box<Pattern>, Box<Term>)
+pub struct Pattern(Box<Value>);
+// pub enum Pattern {
+//     Ignore,
+//     EmptyTuple,
+//     Generic(GenericTerm),
+//     Annotation(Box<Pattern>, Box<Term>)
+// }
+
+impl Pattern {
+    pub fn blank() -> Pattern {
+        Pattern(Box::new(Value::BlankBinder))
+    }
+}
+
+impl From<Value> for Pattern {
+    fn from(value: Value) -> Self {
+        Pattern(Box::new(value))
+    }
 }
 
 // TODO: add annotations to AST
 #[derive(Clone, Debug)]
 pub enum Term {
     Generic(GenericTerm),
+    Hole(Hole),
 
     Call(Box<Term>, Box<Term>),
+    Let(Pattern, Box<Term>, Box<Term>),
     // First(Box<Term>),
     // Second(Box<Term>),
 
@@ -64,9 +79,36 @@ impl From<GenericTerm> for Term {
     }
 }
 
+// TODO: do this; encourage functionalization
+
+// pub struct FuncTypeTerm {
+//     pub pattern: Pattern,
+//     pub left: Box<Term>,
+//     pub right: Box<Term>
+// }
+
+// pub struct TupleTypeTerm {
+//     pub pattern: Pattern,
+//     pub left: Box<Term>,
+//     pub right: Box<Term>
+// }
+
+// pub struct LetTerm {
+//     pub bindee: Pattern,
+//     pub binder: Box<Term>,
+//     pub rest: Box<Term>
+// }
+
+
 #[derive(Clone, Debug)]
 pub enum Value {
-    Neutral(NeutralValue),
+    Type,
+
+    FuncType(Environment, Pattern, Box<Value>, Box<Term>),
+    TupleType(Pattern, Box<Value>, Box<Term>),
+    Unit,
+    Nat,
+    Str,
 
     Func(Environment, Pattern, Box<Term>), 
     ExternalFunc(ExternalFunction),
@@ -74,20 +116,27 @@ pub enum Value {
     EmptyTuple, 
     NatNum(BigUint),
     StrLiteral(String),
-    
-    FuncType(Environment, Pattern, Box<Value>, Box<Term>),
-    TupleType(Pattern, Box<Value>, Box<Term>),
-    Unit,
-    Nat,
-    Str,
-    
-    Type
+
+    Neutral(NeutralValue),
+
+    Hole(Hole),
+
+    BlankBinder,
+    Binder(GenericTerm),
+    Annotation(Box<Pattern>, Box<Term>),
 }
 
 impl Value {
     pub fn is_neutral(&self) -> bool {
         match self {
             Value::Neutral(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_generic_value(&self) -> bool {
+        match self {
+            Value::Neutral(NeutralValue::Generic(_)) => true,
             _ => false
         }
     }
@@ -105,10 +154,17 @@ impl From<NeutralValue> for Value {
     }
 }
 
+impl From<Hole> for Value {
+    fn from(h: Hole) -> Self {
+        Value::Hole(h)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum NeutralValue {
     Generic(GenericValue),
     Call(Box<NeutralValue>, Box<Value>),
+    Let(Pattern, Box<NeutralValue>, Box<Term>),
     ExternalCall(Box<ExternalFunction>, Box<NeutralValue>),
     TupleLeft(Box<NeutralValue>, Box<Value>),
     /// This value's left element is not neutral
@@ -129,6 +185,8 @@ pub enum ElaborationError {
     BindingNotFound(GenericTerm),
     #[error("Unbinding {0:?} not found")]
     UnbindingNotFound(GenericValue),
+    #[error("Hole {0:?} not found")]
+    HoleNotFound(Hole),
     #[error("Type {0:?} not found")]
     TypeNotFound(GenericTerm),
     #[error("Invalid call")]
@@ -137,6 +195,17 @@ pub enum ElaborationError {
     CannotFindTypeOf(GenericTerm),
     #[error("Error binding to {0:?}: expected type {1:?}, found {2:?}")]
     ExpectedTypeFoundType(Pattern, Value, Value),
+    #[error("{0}")]
+    UnificationError(UnificationError)
+}
+
+impl From<UnificationError> for ElaborationError {
+    fn from(value: UnificationError) -> Self {
+        match value {
+            UnificationError::ElaborationError(e) => *e,
+            value @ UnificationError::ExpectedThisGotThat(..) => ElaborationError::UnificationError(value)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -200,13 +269,11 @@ pub mod tests {
     }
 
     // TODO: determine if this is even correct
-    pub fn term_eq(ctx: &mut Context, l: Term, r: Term) -> Result<bool, ElaborationError> {
+    pub fn term_eq(ctx: &mut Context, l: Term, r: Term) -> bool {
         let mut env = &mut ctx.global_environment();
         let l = evaluate(ctx, &mut env, l);
-        println!("{:#?}\n", &ctx);
-        println!("{:#?}\n", &env);
         let r = evaluate(ctx, &mut env, r);
-        return def_equal(ctx, &mut env, &mut l?, &mut r?)
+        return equal(ctx, &mut env, &mut l.unwrap(), &mut r.unwrap())
     }
 
     pub fn surface_evaluate(s: SurfaceTerm) -> Result<Value, ElaborationError> {

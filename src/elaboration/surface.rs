@@ -4,6 +4,8 @@ use thiserror::Error;
 
 use crate::elaboration::{Pattern, Context, Term, generic::*};
 
+use super::Value;
+
 pub enum SurfacePattern {
     Ignore,
     EmptyTuple,
@@ -13,8 +15,12 @@ pub enum SurfacePattern {
 
 pub enum SurfaceTerm {
     Generic(String), // TODO: switch to Cow<str>?
-    Func(SurfacePattern, Box<SurfaceTerm>),
+
     Call(Box<SurfaceTerm>, Box<SurfaceTerm>),
+    Let(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
+
+    Func(SurfacePattern, Box<SurfaceTerm>),
+    
     FuncType(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
     BinaryTuple(Box<SurfaceTerm>, Box<SurfaceTerm>),
     BinaryTupleType(SurfacePattern, Box<SurfaceTerm>, Box<SurfaceTerm>),
@@ -86,18 +92,25 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
         SurfaceTerm::Generic(id) => {
             let generic_term = senv.get_variable(id)?;
             Ok(generic_term.into())
-        }
+        },
+        SurfaceTerm::Call(f, x) => {
+            let f = to_core_inner(ctx, senv, *f)?;
+            let x = to_core_inner(ctx, senv, *x)?;
+            Ok(Term::Call(Box::new(f), Box::new(x)))
+        },
+        SurfaceTerm::Let(patt, bind, rest) => {
+            let bind = Box::new(to_core_inner(ctx, senv, *bind)?);
+            let patt = surface_bind_pattern(ctx, senv, patt)?;
+            let rest = Box::new(to_core_inner(ctx, senv, *rest)?);
+            Ok(Term::Let(patt, bind, rest))
+        },
+
         SurfaceTerm::Func(arg, body) => {
             senv.start_scope();
             let patt = surface_bind_pattern(ctx, senv, arg)?;
             let body = to_core_inner(ctx, senv, *body)?;
             senv.end_scope();
             Ok(Term::Func(patt, Box::new(body)))
-        },
-        SurfaceTerm::Call(f, x) => {
-            let f = to_core_inner(ctx, senv, *f)?;
-            let x = to_core_inner(ctx, senv, *x)?;
-            Ok(Term::Call(Box::new(f), Box::new(x)))
         },
         
         SurfaceTerm::BinaryTuple(l, r) => Ok(Term::Tuple(
@@ -133,20 +146,20 @@ fn to_core_inner(ctx: &mut Context, senv: &mut SurfaceEnvironment, surface: Surf
 
 fn surface_bind_pattern(ctx: &mut Context, senv: &mut SurfaceEnvironment, patt: SurfacePattern) -> Result<Pattern, IdentifierError> {
     match patt {
-        SurfacePattern::Ignore => Ok(Pattern::Ignore),
-        SurfacePattern::EmptyTuple => Ok(Pattern::EmptyTuple),
+        SurfacePattern::Ignore => Ok(Pattern::blank()),
+        SurfacePattern::EmptyTuple => Ok(Pattern(Value::EmptyTuple.into())),
         SurfacePattern::Generic(id) => {
             if ctx.keywords.contains(&id) {
                 Err(IdentifierError::KeywordInPattern(id))
             }
             else {
-                Ok(Pattern::Generic(senv.new_variable(ctx, id)))
+                Ok(Pattern(Value::Binder(senv.new_variable(ctx, id)).into()))
             }
             
         },
         SurfacePattern::Annotation(patt_inner, type_id) => {
             let type_term = to_core_inner(ctx, senv, *type_id)?;
-            Ok(Pattern::Annotation(Box::new(surface_bind_pattern(ctx, senv, *patt_inner)?), Box::new(type_term.into())))
+            Ok(Pattern(Value::Annotation(surface_bind_pattern(ctx, senv, *patt_inner)?.into(), type_term.into()).into()))
         },
     }
 }
@@ -171,7 +184,7 @@ pub mod tests {
         let term_1 = to_core_inner(ctx, &mut SurfaceEnvironment::default(), func(pattern::var("x"), func(pattern::var("x"), var("x")))).unwrap();
         let term_2 = to_core_inner(ctx, &mut SurfaceEnvironment::default(), func(pattern::var("x"), func(pattern::var("y"), var("y")))).unwrap();
 
-        assert!(term_eq(ctx, term_1, term_2).unwrap());
+        assert!(term_eq(ctx, term_1, term_2));
     }
 
     #[test]
@@ -180,7 +193,7 @@ pub mod tests {
         let env = &mut ctx.global_environment();
         let l = &mut surface_evaluate_with_context(ctx, UNIT).unwrap();
         let r = &mut surface_evaluate_with_context(ctx, SurfaceTerm::Generic("Unit".into())).unwrap();
-        assert!(def_equal(ctx, env, l, r).unwrap())
+        assert!(equal(ctx, env, l, r))
     }
 
     #[test]
@@ -189,6 +202,6 @@ pub mod tests {
         let env = &mut ctx.global_environment();
         let l = &mut surface_evaluate_with_context(ctx, TYPE).unwrap();
         let r = &mut surface_evaluate_with_context(ctx, SurfaceTerm::Generic("Type".into())).unwrap();
-        assert!(def_equal(ctx, env, l, r).unwrap())
+        assert!(equal(ctx, env, l, r))
     }
 }

@@ -1,5 +1,3 @@
-use std::{io::Repeat, mem::replace};
-
 use logos::{Logos, Lexer};
 use thiserror::Error;
 use crate::concrete_syntax::{Op, CST};

@@ -1,6 +1,15 @@
 use super::*;
 
 pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -> Result<Term, ElaborationError> {
+    env.update_hole(&mut ty)?;
+    if let Value::Hole(_) = ty {
+        dbg!("b");
+        let (t, mut t_type) = infer(ctx, env, t)?;
+        dbg!(&t_type);
+        dbg!("c");
+        unify(ctx, env, &mut t_type, &mut ty)?;
+        return Ok(t)
+    }
     match t {
         Term::Generic(x) => {
             match env.get_binding(x).and_then(|g| env.get_substitution(g)) {
@@ -14,6 +23,8 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
                 }
             }
         },
+        // Term::Hole(..) => todo!(),
+        Term::Let(..) => todo!(),
         Term::Func(patt, body) => {
             let g = GenericValue::new();
             let Value::FuncType(mut term_env, func_patt, func_arg_type, body_type) = ty else {
@@ -54,30 +65,32 @@ pub fn check(ctx: &mut Context, env: &mut Environment, t: Term, mut ty: Value) -
             env.end_scope();
 
             Ok(Term::Tuple(l, r))
-        }
+        },
+        Term::Hole(..) |
         Term::Nat |
         Term::Str |
         Term::Unit |
         Term::Type |
-        Term::NatNum(_) |
-        Term::StrLiteral(_) |
+        Term::NatNum(..) |
+        Term::StrLiteral(..) |
         Term::Call(..) |
         Term::EmptyTuple |
         Term::FuncType(..) |
-        Term::ExternalFunc(_) |
+        Term::ExternalFunc(..) |
         Term::TupleType(..) => {
             let (t_prime, mut ty_prime) = infer(ctx, env, t)?;
-            if def_equal(ctx, env, &mut ty, &mut ty_prime)? {
+            if equal(ctx, env, &mut ty, &mut ty_prime) {
                 Ok(t_prime)
             }
             else {
                 unimplemented!() // TODO: generate appropriate error message
             }
-        }
+        },
     }
 }
 
 pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term, Value), ElaborationError> {
+    dbg!("aaa");
     match t {
         Term::Generic(x) => {
             match env.get_binding(x).and_then(|g| env.get_substitution(g)) {
@@ -87,6 +100,19 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
                 },
                 None => Ok((x.into(), ctx.try_get_type(x)?))
             }
+        },
+        Term::Hole(h) => todo!(),
+        Term::Let(patt, bindee, rest) => {
+            dbg!("1");
+            // dbg!(&patt);
+            let (patt_type, _) = infer_holed_pattern(ctx, env, patt)?;
+            // dbg!(&patt_type);
+            // dbg!(&bindee);
+            // dbg!(&rest);
+            check(ctx, env, *bindee, patt_type)?;
+            dbg!("3");
+            
+            infer(ctx, env, *rest)
         },
         Term::ExternalFunc(ext_func) => {
             let ty = Value::FuncType(
@@ -101,7 +127,7 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
             env.start_scope();
 
             // TODO: add custom error message if pattern can't be inferred
-            let (arg, arg_type) = infer_pattern(ctx, env, arg)?;
+            let arg_type = infer_pattern(ctx, env, arg.clone())?;
 
             let g = GenericValue::new().into();
 
@@ -193,7 +219,7 @@ pub fn infer(ctx: &mut Context, env: &mut Environment, t: Term) -> Result<(Term,
 
             Ok((
                 Term::Tuple(Box::new(l), Box::new(r)),
-                Value::TupleType(Pattern::Ignore, Box::new(l_type), Box::new(r_type))
+                Value::TupleType(Pattern::blank(), Box::new(l_type), Box::new(r_type))
             ))
         },
         Term::NatNum(n) => Ok((Term::NatNum(n), Value::Nat)),
@@ -227,11 +253,6 @@ pub mod tests {
         println!("Checking starts here.");
         check(ctx, env, term, term_ty)
     }
-
-    // pub fn surface_infer(s: SurfaceTerm) -> Result<(Term, Value), ElaborationError> {
-    //     let mut ctx = Context::default();
-    //     surface_infer_with_context(&mut ctx, s)
-    // }
 
     pub fn surface_infer_with_context(ctx: &mut Context, s: SurfaceTerm) -> Result<(Term, Value), ElaborationError> {
         let env = &mut ctx.global_environment();
@@ -273,7 +294,7 @@ pub mod tests {
 
         let mut ty_prime = surface_evaluate_with_context(ctx, func_type(pattern::var("x"), UNIT, UNIT)).unwrap();
 
-        assert!(def_equal(ctx, env, &mut ty, &mut ty_prime).unwrap());
+        assert!(equal(ctx, env, &mut ty, &mut ty_prime));
     }
 
     #[test]
@@ -283,7 +304,7 @@ pub mod tests {
 
         let (_, mut ty) = surface_infer_with_context(ctx, EMPTY_TUPLE).unwrap();
 
-        assert!(def_equal(ctx, env, &mut ty, &mut Value::Unit).unwrap())
+        assert!(equal(ctx, env, &mut ty, &mut Value::Unit))
     }
 
     #[test]
@@ -296,6 +317,6 @@ pub mod tests {
         let ty2 = to_core(ctx, tuple_type(pattern::IGNORE, UNIT, NAT)).unwrap();
         let mut ty2 = evaluate(ctx, env, ty2).unwrap();
 
-        assert!(def_equal(ctx, env, &mut ty, &mut ty2).unwrap());
+        assert!(equal(ctx, env, &mut ty, &mut ty2));
     }
 }
